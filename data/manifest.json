@@ -1,1 +1,102 @@
-{"buildings": [], "order": []}
+{
+  "buildings": [
+    {
+      "name": "Brooklyn",
+      "slug": "brooklyn",
+      "file": "brooklyn.json",
+      "fecha": "2026-07-07",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "IMU",
+      "slug": "imu",
+      "file": "imu.json",
+      "fecha": "2026-07-24",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "Holley",
+      "slug": "holley",
+      "file": "holley.json",
+      "fecha": "2026-07-15",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "SPOT Nueva Kennedy",
+      "slug": "spot_nueva_kennedy",
+      "file": "spot_nueva_kennedy.json",
+      "fecha": "2026-07-30",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "SOHO",
+      "slug": "soho",
+      "file": "soho.json",
+      "fecha": "2026-08-04",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "SPOT Residence",
+      "slug": "spot_residence",
+      "file": "spot_residence.json",
+      "fecha": "2026-05-19",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "Nativo",
+      "slug": "nativo",
+      "file": "nativo.json",
+      "fecha": "2026-05-22",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "Central",
+      "slug": "central",
+      "file": "central.json",
+      "fecha": "2026-06-15",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "BOLDO",
+      "slug": "boldo",
+      "file": "boldo.json",
+      "fecha": "2026-06-16",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "Park",
+      "slug": "park",
+      "file": "park.json",
+      "fecha": "2026-06-23",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "BLEND",
+      "slug": "blend",
+      "file": "blend.json",
+      "fecha": "2026-07-02",
+      "auditor": "Emilio Merino S."
+    },
+    {
+      "name": "Bellet",
+      "slug": "bellet",
+      "file": "bellet.json",
+      "fecha": "2026-07-03",
+      "auditor": "Emilio Merino S."
+    }
+  ],
+  "order": [
+    "Brooklyn",
+    "IMU",
+    "Holley",
+    "SPOT Nueva Kennedy",
+    "SOHO",
+    "SPOT Residence",
+    "Nativo",
+    "Central",
+    "BOLDO",
+    "Park",
+    "BLEND",
+    "Bellet"
+  ]
+}
