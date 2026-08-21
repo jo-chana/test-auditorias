@@ -21,7 +21,7 @@ export async function onRequest(context) {
   }
 
   // Bloquear acceso directo a los datos crudos
-  if (path.startsWith("/data/")) {
+  if (path.startsWith("/data/") || path.startsWith("/data-greystar/")) {
     return new Response("No autorizado", { status: 403 });
   }
 
