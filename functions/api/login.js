@@ -24,7 +24,7 @@ export async function onRequestPost({ request, env }) {
   }
 
   const token = await createToken(
-    { user: found.user, scope: found.scope },
+    { user: found.user, scope: found.scope, greystar: !!found.greystar },
     getSecret(env)
   );
 
