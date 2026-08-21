@@ -51,13 +51,60 @@ export async function onRequestGet({ request, env, ASSETS }) {
       manifest.buildings.map(async b => [b.name, await readData(b.file)])
     );
     const buildings = Object.fromEntries(entries.filter(([, v]) => v));
-    return json({
+
+    const resp = {
       ok: true,
       scope: "ALL",
       order: manifest.order,
       buildings,
       larLogo,
-    });
+    };
+
+    // ---- Portafolio Greystar: SOLO para usuarios con el flag greystar ----
+    // Se entrega en un objeto aparte. Los edificios LAR de arriba NO se tocan:
+    // su promedio de portafolio se calcula como siempre, sin Greystar.
+    if (session.greystar) {
+      const gsManifest = await readData("../data-greystar/manifest.json");
+      let gsBuildings = {};
+      let gsOrder = [];
+      if (gsManifest && Array.isArray(gsManifest.buildings)) {
+        const gsEntries = await Promise.all(
+          gsManifest.buildings.map(async b => [b.name, await readData("../data-greystar/" + b.file)])
+        );
+        gsBuildings = Object.fromEntries(gsEntries.filter(([, v]) => v));
+        gsOrder = gsManifest.order || gsManifest.buildings.map(b => b.name);
+      }
+
+      // Promedio LAR Group (referencia): se calcula con los 12 edificios LAR
+      // ya cargados. Es solo un benchmark para la vista Greystar; no altera
+      // ningún número de los edificios LAR.
+      const larList = Object.values(buildings);
+      const COMPARABLE = ['Departamentos Vacantes','Pasillos Departamentos','Áreas Comunes Amenities','Áreas de Servicio','Personal'];
+      function avg(arr){ const v=arr.filter(x=>x!=null); return v.length? v.reduce((a,c)=>a+c,0)/v.length : null; }
+      const aristaNames = new Set();
+      larList.forEach(b => b.resumen.aristas.forEach(a => aristaNames.add(a.nombre)));
+      const larAristas = {};
+      aristaNames.forEach(nom => {
+        larAristas[nom] = avg(larList.map(b => {
+          const a = b.resumen.aristas.find(x => x.nombre === nom);
+          return a ? a.pct : null;
+        }));
+      });
+      const larTotalCon = avg(larList.map(b => b.resumen.total.pct));
+      const larTotalSin = avg(larList.map(b => avg(COMPARABLE.map(d => {
+        const a = b.resumen.aristas.find(x => x.nombre === d);
+        return a ? a.pct : null;
+      }))));
+
+      resp.greystar = {
+        enabled: true,
+        order: gsOrder,
+        buildings: gsBuildings,
+        larAvg: { aristas: larAristas, totalCon: larTotalCon, totalSin: larTotalSin, nLar: larList.length },
+      };
+    }
+
+    return json(resp);
   }
 
   // ---- BM / BMA: ve solo su edificio ----
