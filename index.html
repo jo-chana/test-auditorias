@@ -5,6 +5,7 @@
 <title>Dashboard Auditoría — Edificios — Abril–Mayo 2026</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   /* ====== LAR GROUP BRAND SYSTEM ======
      Pantone 7467 C  →  #00A8B4   (turquesa corporativo)
@@ -3629,7 +3630,9 @@ async function bootstrap() {
       const gt = document.getElementById('tab-greystar');
       if (gt) gt.style.display = '';
     }
+    window.ALL_BUILDINGS = ALL_BUILDINGS;
     injectLogout();
+    if (d.puede_cargar && window.CargaAuditoria) window.CargaAuditoria.injectButton();
   } catch (e) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div style="padding:24px;font-family:sans-serif;color:#b00;background:#fff3f3;border:1px solid #f3c;margin:16px;border-radius:8px">' +
@@ -3763,5 +3766,249 @@ if (document.readyState === 'loading') {
 }
 
 </script>
+
+<script>
+(function(){
+// ================== MOTOR COMPLETO (embebido) ==================
+const RECIPES = {
+  brooklyn:{dept_item_col:2,has_eco:false}, imu:{dept_item_col:2,has_eco:false},
+  holley:{dept_item_col:2,has_eco:false}, spot_nueva_kennedy:{dept_item_col:2,has_eco:false},
+  park:{dept_item_col:2,has_eco:false}, boldo:{dept_item_col:2,has_eco:false},
+  bellet:{dept_item_col:2,has_eco:false}, blend:{dept_item_col:3,has_eco:false},
+  soho:{dept_item_col:3,has_eco:true}, nativo:{dept_item_col:2,has_eco:false},
+  central:{dept_item_col:2,has_eco:false}, spot_residence:{dept_item_col:2,has_eco:false},
+};
+const CANON = ['Departamentos Vacantes','Pasillos Departamentos','Áreas Comunes Amenities','Áreas de Servicio','Personal','Compliance'];
+const CANON_ECO = ['Departamentos Vacantes','Pasillos Departamentos','Pasillos Ecológicos','Áreas Comunes Amenities','Áreas de Servicio','Personal','Compliance'];
+const MES3=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+function cell(ws,r,c){ const a=XLSX.utils.encode_cell({r:r-1,c:c-1}); return (ws&&ws[a]!==undefined)?ws[a].v:null; }
+function num(v){ if(v===null||v===undefined) return null; const s=String(v).trim().toUpperCase(); if(['NE','N/E','N/A','-',''].includes(s)) return null; const f=parseFloat(v); return isNaN(f)?null:f; }
+function round(x,n){ const p=Math.pow(10,n); return Math.round(x*p)/p; }
+function sheetByName(wb,...frags){ return wb.SheetNames.find(s=>frags.some(f=>s.toLowerCase().includes(f))); }
+function yrkey(l){ const p=l.split(' '); return p[0].slice(0,3).toUpperCase()+p[1].slice(-2); }
+
+function detectarFecha(wb){
+  for(const sn of ['Personal','Compliance','Areas de Servicio','Departamentos']){
+    const ws=wb.Sheets[sn]; if(!ws) continue;
+    for(let r=1;r<=6;r++) for(let c=1;c<=13;c++){
+      const v=cell(ws,r,c);
+      if(v instanceof Date && v.getFullYear()>=2026) return v;
+      if(typeof v==='number' && v>45000 && v<60000){ const d=XLSX.SSF?XLSX.SSF.parse_date_code(v):null; if(d&&d.y>=2026) return new Date(d.y,d.m-1,d.d); }
+    }
+  }
+  return null;
+}
+function fechaISO(d){ return d? d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0') : null; }
+function periodoLabel(d){ return d? MES3[d.getMonth()]+' '+d.getFullYear() : null; }
+
+function leerDahsboard(wb){
+  const dn=sheetByName(wb,'ahsboard','ashboard'); const ws=wb.Sheets[dn];
+  const aristas=[],alertas=[],notas=[]; let total=null;
+  for(let r=6;r<20;r++){
+    const lbl=String(cell(ws,r,2)||'').trim(); if(!lbl) continue;
+    const L=lbl.toUpperCase();
+    const pct=num(cell(ws,r,8)),nota=num(cell(ws,r,9));
+    const items=num(cell(ws,r,4)),pmax=num(cell(ws,r,6)),pobt=num(cell(ws,r,7));
+    if(pct===null) continue;
+    const rec={nombre:lbl,pct:round(pct,6),nota:nota?round(nota,4):null,items_eval:items?Math.round(items):null,pct_eval:1.0,pmax,pobt};
+    if(pmax&&pobt!==null&&Math.abs(pct-pobt/pmax)>0.01) notas.push('«'+lbl+'»: celdas de puntaje desactualizadas en el Excel; se usa el % (col 8).');
+    if(L.startsWith('TOTAL')){ total=rec; break; } else aristas.push(rec);
+  }
+  return {aristas,total,alertas,notas};
+}
+function extraerDetalle(wb,slug){
+  const rec=RECIPES[slug]||{}; const itemCol=rec.dept_item_col||2; const hasEco=rec.has_eco||false;
+  const SEC={'ITEM A OBSERVAR HABITACIÓN':'Habitación','ITEM A OBSERVAR EN BAÑO':'Baño','PRESENTACIÓN DEL DEPARTAMENTO':'Presentación','PRESENTACIÓN':'Presentación'};
+  const NO_UNIDAD=new Set(['MANTENCIÓN','MANTENCION','OBSERVACIONES','OBSERVACION','PROMEDIO','NOTA','TOTAL']);
+  const ws=wb.Sheets['Departamentos']; const ustart=itemCol+2; const depts=[];
+  for(let c=ustart;c<15;c++){ const v=cell(ws,9,c); if(v!==null&&v!==''&&!NO_UNIDAD.has(String(v).trim().toUpperCase())) depts.push(c); }
+  const auditados=depts.map(c=>String(cell(ws,9,c)).split('.')[0].trim());
+  const depItems=[]; let section='Habitación';
+  for(let r=10;r<80;r++){ const b=cell(ws,r,itemCol); if(b===null) continue;
+    const k=String(b).trim().toUpperCase();
+    if(k.startsWith('TOTAL')||k.includes('EVALUAD')||k.includes('PUNTAJE')) break;
+    const rowsc=depts.map(cc=>num(cell(ws,r,cc)));
+    if(SEC[k]!==undefined&&!rowsc.some(x=>x!==null)){ section=SEC[k]; continue; }
+    const sc=rowsc.filter(x=>x!==null);
+    if(sc.length) depItems.push({section,item:String(b).trim(),avg:round(sc.reduce((a,c)=>a+c,0)/sc.length,2),n:sc.length}); }
+  function pas(name){ const ws=wb.Sheets[name]; if(!ws) return [];
+    let pcols=[]; for(let c=5;c<11;c++){ if(cell(ws,7,c)!==null&&cell(ws,7,c)!=='') pcols.push(c); }
+    if(!pcols.length){ for(let c=5;c<11;c++){ if(typeof cell(ws,9,c)==='number') pcols.push(c); } }
+    const out=[]; let grp=null;
+    for(let r=9;r<60;r++){ const b=cell(ws,r,2), d=cell(ws,r,4);
+      if(b) grp=String(b).trim();
+      if(d!==null){ const du=String(d).trim().toUpperCase();
+        if(du.startsWith('TOTAL')||du.includes('EVALUAD')||du.includes('PUNTAJE')||du.startsWith('%')) break;
+        const sc=pcols.map(c=>num(cell(ws,r,c))).filter(x=>x!==null);
+        if(sc.length) out.push({group:grp||'General',item:String(d).trim(),avg:round(sc.reduce((a,c)=>a+c,0)/sc.length,2),n:sc.length}); } }
+    return out; }
+  const pasName=wb.SheetNames.includes('Pasillos Departamentos')?'Pasillos Departamentos':'Pasillos departamentos';
+  const pasillos=pas(pasName); let eco=null;
+  if(hasEco){ const en=wb.SheetNames.find(s=>s.toLowerCase().includes('ecol')); eco=pas(en); }
+  function simple(sheet,scol){ const ws=wb.Sheets[sheet]; if(!ws) return [];
+    const rng=XLSX.utils.decode_range(ws['!ref']); const out=[]; let area=null;
+    for(let r=6;r<=rng.e.r+1;r++){ const b=cell(ws,r,2), d=cell(ws,r,4), g=num(cell(ws,r,scol));
+      if(b) area=String(b).replace(/\n/g,' ').trim();
+      if(d!==null){ const du=String(d).trim().toUpperCase();
+        if(du.startsWith('TOTAL')||du.includes('EVALUAD')||du.includes('PUNTAJE M')||du.includes('PUNTAJE O')||du.startsWith('%')) break; }
+      if(d&&g!==null) out.push({area,item:String(d).trim(),score:g}); }
+    return out; }
+  const areas_comunes=simple('Areas Comunes Amenities',7), areas_servicio=simple('Areas de Servicio',7), personal=simple('Personal',8);
+  const wsc=wb.Sheets['Compliance']; const compliance=[]; let area=null;
+  if(wsc){ const rng=XLSX.utils.decode_range(wsc['!ref']);
+    for(let r=6;r<=rng.e.r+1;r++){ const b=cell(wsc,r,2), d=cell(wsc,r,4), g=cell(wsc,r,7);
+      if(b) area=String(b).replace(/\n/g,' ').trim();
+      if(d!==null&&g!==null){ const sc=num(g); if(sc===null) continue; const obs=cell(wsc,r,8);
+        compliance.push({area,item:String(d).trim(),score:sc,obs:obs?String(obs).trim():''}); } } }
+  return {departamentos:{auditados,items:depItems},pasillos,eco,areas_comunes,areas_servicio,personal,compliance};
+}
+function resumen(items,key){ const agg={}; for(const it of items){ const k=it.area||it.group||it.section; (agg[k]=agg[k]||[]).push(it[key]!==undefined?it[key]:it.avg); } return Object.entries(agg).map(([a,v])=>({area:a,avg:round(v.reduce((x,y)=>x+y,0)/v.length,2),count:v.length})); }
+function planAccion(det){ const cards=[]; const cresp={'Certificaciones y Capacitación':'BM + Administración','Edificio':'BM','Administración':'Administración'};
+  for(const c of det.compliance){ if(c.score<1){ cards.push({prio:'alta',titulo:c.item.slice(0,70),dim:'Compliance',responsable:cresp[c.area]||'BM + Administración',plazo:14,hallazgo:'En '+c.area+': «'+c.item+'» con cumplimiento '+c.score.toFixed(1)+'/1.'+(c.obs?' Observación: '+c.obs:''),accion:['Regularizar: '+c.item+'.','Archivar la documentación faltante.','Cargar el respaldo en compliance.'],kpi_cierre:'Ítem con documentación completa.',kpi_seg:'Revisión mensual del checklist.'}); } }
+  const op=[['Departamentos',det.departamentos.items.map(x=>[x.section,x.item,x.avg])],['Pasillos',det.pasillos.map(x=>[x.group,x.item,x.avg])]];
+  if(det.eco) op.push(['Pasillos Ecológicos',det.eco.map(x=>[x.group,x.item,x.avg])]);
+  op.push(['Áreas Comunes',det.areas_comunes.map(x=>[x.area,x.item,x.score])],['Áreas de Servicio',det.areas_servicio.map(x=>[x.area,x.item,x.score])],['Personal',det.personal.map(x=>[x.area,x.item,x.score])]);
+  for(const [dim,items] of op) for(const [area,item,sc] of items){ if(sc<4.0){ const prio=sc<2.5?'alta':(sc<3.5?'media':'baja'); cards.push({prio,titulo:item.slice(0,70),dim,responsable:'BM',plazo:prio==='alta'?14:(prio==='media'?30:60),hallazgo:'En '+area+': «'+item+'» obtuvo '+sc.toFixed(1)+'/5.',accion:['Inspeccionar y corregir: '+item+'.','Coordinar con el responsable.','Verificar en la siguiente ronda.'],kpi_cierre:'Ítem «'+item.slice(0,40)+'» ≥ 4/5.',kpi_seg:'Control quincenal.'}); } }
+  const ord={alta:0,media:1,baja:2}; cards.sort((a,b)=>(ord[a.prio]-ord[b.prio])||((a.dim==='Compliance'?0:1)-(b.dim==='Compliance'?0:1))); return cards.slice(0,12);
+}
+function procesarReaudit(wb, slug, old, nuevoPeriodo, fecha){
+  const {aristas:ar_d, total:tot_d, alertas, notas}=leerDahsboard(wb);
+  const det=extraerDetalle(wb, slug);
+  const rec=RECIPES[slug]||{}; const nEsp=rec.has_eco?7:6;
+  if(ar_d.length){ const calc=ar_d.reduce((a,c)=>a+c.pct,0)/ar_d.length; if(tot_d&&Math.abs(calc-tot_d.pct)>0.006) alertas.push('El total del Excel ('+(tot_d.pct*100).toFixed(1)+'%) no coincide con el promedio de aristas ('+(calc*100).toFixed(1)+'%).'); }
+  if(ar_d.length!==nEsp) alertas.push('Se esperaban '+nEsp+' aristas y el Excel trae '+ar_d.length+'.');
+  if(det.compliance.length===0) alertas.push('No se encontraron ítems de Compliance.');
+  // Si el período nuevo es el mismo que el último existente, se REEMPLAZA (no se duplica)
+  const dimOrder=old.historico.dim_order;
+  const _per=old.historico.periods.slice(); const _dims={}; for(const dm of dimOrder) _dims[dm]=old.historico.dims[dm].slice();
+  let _oldTotArr = old.historico.total ? old.historico.total.slice() : Object.values((old.resumen&&old.resumen.total&&old.resumen.total.historico)||{});
+  if(_per.length && _per[_per.length-1]===nuevoPeriodo){
+    _per.pop(); for(const dm of dimOrder) _dims[dm].pop(); if(_oldTotArr.length) _oldTotArr.pop();
+  }
+  const aristas=ar_d.map((a,i)=>({nombre:dimOrder[i]||a.nombre,pct:a.pct,nota:a.nota,items_eval:a.items_eval,pct_eval:1.0,pmax:a.pmax,pobt:a.pobt}));
+  const total={pct:tot_d.pct,nota:tot_d.nota,items_eval:tot_d.items_eval,pct_eval:1.0,pmax:tot_d.pmax,pobt:tot_d.pobt};
+  const periods=_per.concat([nuevoPeriodo]); const keys=periods.map(yrkey);
+  const dims={}; for(const dm of dimOrder){ const jul=aristas.find(a=>a.nombre===dm); dims[dm]=_dims[dm].concat([jul?round(jul.pct,4):null]); }
+  const totalSeries=_oldTotArr.concat([round(tot_d.pct,4)]);
+  aristas.forEach(a=>{ a.historico={}; keys.forEach((k,i)=>a.historico[k]=dims[a.nombre][i]); });
+  total.historico={}; keys.forEach((k,i)=>total.historico[k]=totalSeries[i]);
+  const historico={periods,dims,dim_order:dimOrder,total:totalSeries};
+  const semaforo=alertas.length?'AMARILLO':'VERDE';
+  const datos={fecha,aristas,total,historico,detalle:det};
+  return {datos, semaforo, alertas, notas};
+}
+function armarJson(datos, slug, old){
+  const det=datos.detalle; const d=Object.assign({},old);
+  d.resumen={fecha:datos.fecha,auditor:'Emilio Merino S.',edificio:old.resumen.edificio,aristas:datos.aristas,total:datos.total};
+  d.departamentos=det.departamentos; d.pasillos=det.pasillos; d.areas_comunes=det.areas_comunes; d.areas_servicio=det.areas_servicio; d.personal=det.personal; d.compliance=det.compliance;
+  d.areas_comunes_resumen=resumen(det.areas_comunes,'score'); d.areas_servicio_resumen=resumen(det.areas_servicio,'score');
+  d.personal_resumen=resumen(det.personal,'score'); d.compliance_resumen=resumen(det.compliance,'score');
+  d.pasillos_resumen=resumen(det.pasillos,'avg'); d.departamentos_resumen=resumen(det.departamentos.items,'avg');
+  if(det.eco){ d.pasillos_eco=det.eco; d.pasillos_eco_resumen=resumen(det.eco,'avg'); }
+  d.historico=datos.historico; d.plan_accion=planAccion(det); d.pulso=old.pulso; d.logo=old.logo;
+  return d;
+}
+
+
+const NAMES={brooklyn:'Brooklyn',imu:'IMU',holley:'Holley',spot_nueva_kennedy:'SPOT Nueva Kennedy',soho:'SOHO',spot_residence:'SPOT Residence',nativo:'Nativo',central:'Central',boldo:'BOLDO',park:'Park',blend:'BLEND',bellet:'Bellet'};
+let PENDIENTE=null;
+
+function injectButton(){
+  if(document.getElementById('lar-cargar')) return;
+  const b=document.createElement('button');
+  b.id='lar-cargar'; b.textContent='Cargar auditoría'; b.className='no-print';
+  b.style.cssText='position:fixed;top:16px;right:280px;z-index:9999;padding:8px 16px;font-size:13px;font-weight:600;color:#fff;background:#1a2b2d;border:1.5px solid #1a2b2d;border-radius:8px;cursor:pointer;font-family:Segoe UI,system-ui,sans-serif';
+  b.onclick=open;
+  document.body.appendChild(b);
+}
+
+function open(){
+  let ov=document.getElementById('carga-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='carga-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(10,40,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;font-family:Segoe UI,system-ui,sans-serif';
+  ov.innerHTML = panelHTML();
+  ov.querySelector('#cg-close').onclick=()=>{ ov.remove(); PENDIENTE=null; };
+  ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); PENDIENTE=null; } });
+  const drop=ov.querySelector('#cg-drop'), fi=ov.querySelector('#cg-file');
+  drop.onclick=()=>fi.click();
+  drop.ondragover=e=>{e.preventDefault();drop.style.borderColor='#00A8B4';};
+  drop.ondragleave=()=>{drop.style.borderColor='#cfe0e2';};
+  drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='#cfe0e2'; if(e.dataTransfer.files.length) manejar(e.dataTransfer.files[0]);};
+  fi.onchange=e=>{ if(e.target.files.length) manejar(e.target.files[0]); };
+  ov.querySelector('#cg-pub').onclick=publicar;
+}
+
+function panelHTML(){
+  let opts=Object.entries(NAMES).map(([s,n])=>'<option value="'+s+'">'+n+'</option>').join('');
+  return '<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;padding:28px 30px;box-shadow:0 20px 60px rgba(0,60,65,.25)">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><h2 style="margin:0;font-size:20px;color:#1a2b2d">Cargar auditoría</h2><button id="cg-close" style="border:none;background:none;font-size:24px;color:#6b7d7f;cursor:pointer;line-height:1">&times;</button></div>'
+   +'<p style="color:#6b7d7f;font-size:13.5px;margin:0 0 18px">Sube el Excel de la auditoría. El sistema lo valida y, si todo calza, lo publicas al instante.</p>'
+   +'<label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Edificio auditado</label>'
+   +'<select id="cg-edificio" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:16px">'+opts+'</select>'
+   +'<div id="cg-drop" style="border:2px dashed #cfe0e2;border-radius:14px;padding:34px 20px;text-align:center;cursor:pointer"><div style="font-size:15px;color:#1a2b2d">Arrastra el Excel aquí</div><div style="font-size:12.5px;color:#6b7d7f;margin-top:4px">o haz clic para elegirlo (.xlsx)</div><input type="file" id="cg-file" accept=".xlsx,.xls" style="display:none"></div>'
+   +'<div id="cg-err" style="color:#b3261e;font-size:13.5px;margin-top:12px"></div>'
+   +'<div id="cg-result" style="display:none;margin-top:18px"></div>'
+   +'<div id="cg-pubwrap" style="display:none;margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap"><span id="cg-pubtxt" style="font-size:13px;color:#6b7d7f;flex:1"></span><button id="cg-pub" disabled style="background:#00A8B4;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:14.5px;font-weight:600;cursor:not-allowed;opacity:.5">Publicar</button></div>'
+   +'</div>';
+}
+
+function manejar(file){
+  const ov=document.getElementById('carga-overlay');
+  const err=ov.querySelector('#cg-err'), res=ov.querySelector('#cg-result'), pw=ov.querySelector('#cg-pubwrap');
+  err.textContent=''; res.style.display='none'; pw.style.display='none'; PENDIENTE=null;
+  const slug=ov.querySelector('#cg-edificio').value;
+  const all=window.ALL_BUILDINGS;
+  if(!all){ err.textContent='No cargaron los datos actuales. Recarga el dashboard.'; return; }
+  const old=all[NAMES[slug]];
+  if(!old){ err.textContent='No hay datos previos de '+NAMES[slug]+' para encadenar.'; return; }
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const f=detectarFecha(wb); const fecha=fechaISO(f)||old.resumen.fecha; const periodo=periodoLabel(f)||'Nuevo';
+      const {datos,semaforo,alertas,notas}=procesarReaudit(wb,slug,old,periodo,fecha);
+      const data=armarJson(datos,slug,old);
+      PENDIENTE={slug,edificio:old.resumen.edificio,data,semaforo};
+      render(data,semaforo,alertas,notas,periodo,fecha);
+    }catch(err2){ err.textContent='No se pudo procesar: '+err2.message; }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function render(data,semaforo,alertas,notas,periodo,fecha){
+  const ov=document.getElementById('carga-overlay');
+  const res=ov.querySelector('#cg-result'), pw=ov.querySelector('#cg-pubwrap'), pb=ov.querySelector('#cg-pub'), pt=ov.querySelector('#cg-pubtxt');
+  const verde=semaforo==='VERDE';
+  let rows=data.resumen.aristas.map(a=>{const p=(a.pct*100).toFixed(1);return '<tr><td style="padding:7px 0;border-bottom:1px solid #f0f5f5;font-size:14px">'+a.nombre+'</td><td style="padding:7px 0;border-bottom:1px solid #f0f5f5;text-align:right;font-weight:600;font-size:14px">'+p+'%</td></tr>';}).join('');
+  rows+='<tr><td style="padding:9px 0;font-weight:700;border-top:2px solid #e3eced">Total</td><td style="padding:9px 0;text-align:right;font-weight:700;color:#00A8B4;border-top:2px solid #e3eced">'+(data.resumen.total.pct*100).toFixed(1)+'%</td></tr>';
+  let al = alertas.length ? '<div style="margin-top:12px"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#9a6b00;font-weight:600;margin-bottom:4px">Revisar antes de publicar</div>'+alertas.map(a=>'<div style="font-size:13px;color:#9a6b00;margin:4px 0">⚠ '+a+'</div>').join('')+'</div>' : '';
+  let nt = notas.length ? '<div style="margin-top:10px">'+notas.map(n=>'<div style="font-size:12px;color:#6b7d7f;margin:3px 0">· '+n+'</div>').join('')+'</div>' : '';
+  res.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;background:'+(verde?'#e7f7f0':'#fdf4e0')+';margin-bottom:14px">'
+    +'<span style="width:14px;height:14px;border-radius:50%;background:'+(verde?'#12855f':'#9a6b00')+'"></span>'
+    +'<div><div style="font-weight:600;font-size:14.5px;color:'+(verde?'#12855f':'#9a6b00')+'">'+(verde?'Todo calza':'Revisa antes de publicar')+'</div>'
+    +'<div style="font-size:12.5px;color:#6b7d7f">'+(verde?('Período '+periodo+' ('+fecha+'). Listo para publicar.'):(alertas.length+' punto(s) por revisar.'))+'</div></div></div>'
+    +'<table style="width:100%;border-collapse:collapse">'+rows+'</table>'+al+nt;
+  res.style.display='block'; pw.style.display='flex';
+  if(verde){ pb.disabled=false; pb.style.cursor='pointer'; pb.style.opacity='1'; pt.textContent='Al publicar, el edificio se actualiza en el dashboard al instante.'; }
+  else{ pb.disabled=true; pb.style.cursor='not-allowed'; pb.style.opacity='.5'; pt.textContent='Corrige los puntos marcados y vuelve a subir el Excel.'; }
+}
+
+async function publicar(){
+  if(!PENDIENTE || PENDIENTE.semaforo!=='VERDE') return;
+  const ov=document.getElementById('carga-overlay'); const pb=ov.querySelector('#cg-pub'), pt=ov.querySelector('#cg-pubtxt');
+  pb.disabled=true; pb.textContent='Publicando...';
+  try{
+    const r=await fetch('/api/publicar',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({slug:PENDIENTE.slug,edificio:PENDIENTE.edificio,data:PENDIENTE.data})});
+    const d=await r.json();
+    if(d.ok){ pt.innerHTML='<b style="color:#12855f">✓ Publicado.</b> '+PENDIENTE.edificio+' actualizado. Recarga el dashboard para verlo.'; pb.textContent='Publicado ✓'; pb.style.background='#12855f'; }
+    else{ pt.textContent='No se pudo publicar: '+(d.error||'error'); pb.disabled=false; pb.textContent='Publicar'; }
+  }catch(e){ pt.textContent='Error de conexión al publicar.'; pb.disabled=false; pb.textContent='Publicar'; }
+}
+
+window.CargaAuditoria={injectButton,open};
+})();
+</script>
+
 </body>
 </html>
