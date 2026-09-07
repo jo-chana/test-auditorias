@@ -3897,21 +3897,44 @@ function procesarReaudit(wb, slug, old, nuevoPeriodo, fecha){
   const datos={fecha,aristas,total,historico,detalle:det};
   return {datos, semaforo, alertas, notas};
 }
+
+function procesarNuevo(wb, slug, edificio, periodo, fecha){
+  const {aristas:ar_d, total:tot_d, alertas, notas}=leerDahsboard(wb);
+  const hasEco = wb.SheetNames.some(x=>x.toLowerCase().includes('ecol'));
+  if(!RECIPES[slug]) RECIPES[slug]={dept_item_col:2,has_eco:hasEco};
+  const det=extraerDetalle(wb, slug);
+  const dim_order = (ar_d.length===7)?CANON_ECO.slice():CANON.slice();
+  const aristas=ar_d.map((a,i)=>({nombre:dim_order[i]||a.nombre,pct:a.pct,nota:a.nota,items_eval:a.items_eval,pct_eval:1.0,pmax:a.pmax,pobt:a.pobt}));
+  const total={pct:tot_d.pct,nota:tot_d.nota,items_eval:tot_d.items_eval,pct_eval:1.0,pmax:tot_d.pmax,pobt:tot_d.pobt};
+  const keys=[yrkey(periodo)];
+  const dims={}; dim_order.forEach(dm=>{ const a=aristas.find(x=>x.nombre===dm); dims[dm]=[a?round(a.pct,4):null]; });
+  const totalSeries=[round(tot_d.pct,4)];
+  aristas.forEach(a=>{ a.historico={}; a.historico[keys[0]]=dims[a.nombre][0]; });
+  total.historico={}; total.historico[keys[0]]=totalSeries[0];
+  const historico={periods:[periodo],dims,dim_order,total:totalSeries};
+  if(ar_d.length!==dim_order.length) alertas.push('Se leyeron '+ar_d.length+' aristas.');
+  const semaforo=alertas.length?'AMARILLO':'VERDE';
+  return {datos:{fecha,aristas,total,historico,detalle:det,edificio}, semaforo, alertas, notas};
+}
+
 function armarJson(datos, slug, old){
-  const det=datos.detalle; const d=Object.assign({},old);
-  d.resumen={fecha:datos.fecha,auditor:'Emilio Merino S.',edificio:old.resumen.edificio,aristas:datos.aristas,total:datos.total};
+  const det=datos.detalle; const d = old ? Object.assign({},old) : {};
+  d.resumen={fecha:datos.fecha,auditor:'Emilio Merino S.',edificio: old ? old.resumen.edificio : datos.edificio,aristas:datos.aristas,total:datos.total};
   d.departamentos=det.departamentos; d.pasillos=det.pasillos; d.areas_comunes=det.areas_comunes; d.areas_servicio=det.areas_servicio; d.personal=det.personal; d.compliance=det.compliance;
   d.areas_comunes_resumen=resumen(det.areas_comunes,'score'); d.areas_servicio_resumen=resumen(det.areas_servicio,'score');
   d.personal_resumen=resumen(det.personal,'score'); d.compliance_resumen=resumen(det.compliance,'score');
   d.pasillos_resumen=resumen(det.pasillos,'avg'); d.departamentos_resumen=resumen(det.departamentos.items,'avg');
   if(det.eco){ d.pasillos_eco=det.eco; d.pasillos_eco_resumen=resumen(det.eco,'avg'); }
-  d.historico=datos.historico; d.plan_accion=planAccion(det); d.pulso=old.pulso; d.logo=old.logo;
+  d.historico=datos.historico; d.plan_accion=planAccion(det);
+  d.pulso = old ? old.pulso : {entries:[],questions:[],global_avg:null,n_audits:0};
+  d.logo = old ? old.logo : null;
   return d;
 }
 
 
 const NAMES={brooklyn:'Brooklyn',imu:'IMU',holley:'Holley',spot_nueva_kennedy:'SPOT Nueva Kennedy',soho:'SOHO',spot_residence:'SPOT Residence',nativo:'Nativo',central:'Central',boldo:'BOLDO',park:'Park',blend:'BLEND',bellet:'Bellet'};
 let PENDIENTE=null;
+function slugify(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); }
 
 function injectButton(){
   if(document.getElementById('lar-cargar')) return;
@@ -3929,6 +3952,9 @@ function open(){
   ov.innerHTML = panelHTML();
   ov.querySelector('#cg-close').onclick=()=>{ ov.remove(); PENDIENTE=null; };
   ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); PENDIENTE=null; } });
+  const tipo=ov.querySelector('#cg-tipo');
+  tipo.onchange=()=>toggleTipo(ov);
+  toggleTipo(ov);
   const drop=ov.querySelector('#cg-drop'), fi=ov.querySelector('#cg-file');
   drop.onclick=()=>fi.click();
   drop.ondragover=e=>{e.preventDefault();drop.style.borderColor='#00A8B4';};
@@ -3938,17 +3964,30 @@ function open(){
   ov.querySelector('#cg-pub').onclick=publicar;
 }
 
+function toggleTipo(ov){
+  const t=ov.querySelector('#cg-tipo').value;
+  ov.querySelector('#cg-existente-wrap').style.display = (t==='existente')?'block':'none';
+  ov.querySelector('#cg-nuevo-wrap').style.display = (t==='existente')?'none':'block';
+}
+
 function panelHTML(){
   let opts=Object.entries(NAMES).map(([s,n])=>'<option value="'+s+'">'+n+'</option>').join('');
+  const puedeGrey = !!window.GREYSTAR;
+  let tipoOpts='<option value="existente">Edificio LAR (existente)</option><option value="nuevo">Edificio LAR nuevo</option>';
+  if(puedeGrey) tipoOpts+='<option value="greystar">Edificio Greystar</option>';
   return '<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;padding:28px 30px;box-shadow:0 20px 60px rgba(0,60,65,.25)">'
    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><h2 style="margin:0;font-size:20px;color:#1a2b2d">Cargar auditoría</h2><button id="cg-close" style="border:none;background:none;font-size:24px;color:#6b7d7f;cursor:pointer;line-height:1">&times;</button></div>'
    +'<p style="color:#6b7d7f;font-size:13.5px;margin:0 0 18px">Sube el Excel de la auditoría. El sistema lo valida y, si todo calza, lo publicas al instante.</p>'
-   +'<label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Edificio auditado</label>'
-   +'<select id="cg-edificio" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:16px">'+opts+'</select>'
+   +'<label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Tipo de carga</label>'
+   +'<select id="cg-tipo" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:14px">'+tipoOpts+'</select>'
+   +'<div id="cg-existente-wrap"><label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Edificio</label>'
+   +'<select id="cg-edificio" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:16px">'+opts+'</select></div>'
+   +'<div id="cg-nuevo-wrap" style="display:none"><label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Nombre del edificio nuevo</label>'
+   +'<input id="cg-nombre" type="text" placeholder="Ej: Torre Vitacura" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:16px"></div>'
    +'<div id="cg-drop" style="border:2px dashed #cfe0e2;border-radius:14px;padding:34px 20px;text-align:center;cursor:pointer"><div style="font-size:15px;color:#1a2b2d">Arrastra el Excel aquí</div><div style="font-size:12.5px;color:#6b7d7f;margin-top:4px">o haz clic para elegirlo (.xlsx)</div><input type="file" id="cg-file" accept=".xlsx,.xls" style="display:none"></div>'
    +'<div id="cg-err" style="color:#b3261e;font-size:13.5px;margin-top:12px"></div>'
    +'<div id="cg-result" style="display:none;margin-top:18px"></div>'
-   +'<div id="cg-pubwrap" style="display:none;margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap"><span id="cg-pubtxt" style="font-size:13px;color:#6b7d7f;flex:1"></span><button id="cg-pub" disabled style="background:#00A8B4;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:14.5px;font-weight:600;cursor:not-allowed;opacity:.5">Publicar</button></div>'
+   +'<div id="cg-pubwrap" style="display:none;margin-top:16px;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap"><span id="cg-pubtxt" style="font-size:13px;color:#6b7d7f;flex:1"></span><button id="cg-pub" disabled style="background:#00A8B4;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:14.5px;font-weight:600;cursor:not-allowed;opacity:.5">Publicar</button></div>'
    +'</div>';
 }
 
@@ -3956,26 +3995,37 @@ function manejar(file){
   const ov=document.getElementById('carga-overlay');
   const err=ov.querySelector('#cg-err'), res=ov.querySelector('#cg-result'), pw=ov.querySelector('#cg-pubwrap');
   err.textContent=''; res.style.display='none'; pw.style.display='none'; PENDIENTE=null;
-  const slug=ov.querySelector('#cg-edificio').value;
+  const tipo=ov.querySelector('#cg-tipo').value;
   const all=window.ALL_BUILDINGS;
-  if(!all){ err.textContent='No cargaron los datos actuales. Recarga el dashboard.'; return; }
-  const old=all[NAMES[slug]];
-  if(!old){ err.textContent='No hay datos previos de '+NAMES[slug]+' para encadenar.'; return; }
   const reader=new FileReader();
   reader.onload=e=>{
     try{
       const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
-      const f=detectarFecha(wb); const fecha=fechaISO(f)||old.resumen.fecha; const periodo=periodoLabel(f)||'Nuevo';
-      const {datos,semaforo,alertas,notas}=procesarReaudit(wb,slug,old,periodo,fecha);
-      const data=armarJson(datos,slug,old);
-      PENDIENTE={slug,edificio:old.resumen.edificio,data,semaforo};
-      render(data,semaforo,alertas,notas,periodo,fecha);
+      const f=detectarFecha(wb);
+      let slug, edificio, old=null, portafolio='lar', datos, semaforo, alertas, notas;
+      if(tipo==='existente'){
+        slug=ov.querySelector('#cg-edificio').value; old=all?all[NAMES[slug]]:null;
+        if(!old){ err.textContent='No hay datos previos de '+NAMES[slug]+' para encadenar.'; return; }
+        const fecha=fechaISO(f)||old.resumen.fecha; const periodo=periodoLabel(f)||'Nuevo';
+        ({datos,semaforo,alertas,notas}=procesarReaudit(wb,slug,old,periodo,fecha));
+        var data=armarJson(datos,slug,old);
+      } else {
+        edificio=(ov.querySelector('#cg-nombre').value||'').trim();
+        if(!edificio){ err.textContent='Escribe el nombre del edificio nuevo.'; return; }
+        slug=slugify(edificio); portafolio = (tipo==='greystar')?'greystar':'lar';
+        const fecha=fechaISO(f)||new Date().toISOString().slice(0,10); const periodo=periodoLabel(f)||'Nuevo';
+        ({datos,semaforo,alertas,notas}=procesarNuevo(wb,slug,edificio,periodo,fecha));
+        var data=armarJson(datos,slug,null);
+      }
+      const edif = old ? old.resumen.edificio : edificio;
+      PENDIENTE={portafolio,slug,edificio:edif,data,semaforo};
+      render(data,semaforo,alertas,notas, periodoLabel(f)||'Nuevo', fechaISO(f)||data.resumen.fecha, portafolio, tipo!=='existente');
     }catch(err2){ err.textContent='No se pudo procesar: '+err2.message; }
   };
   reader.readAsArrayBuffer(file);
 }
 
-function render(data,semaforo,alertas,notas,periodo,fecha){
+function render(data,semaforo,alertas,notas,periodo,fecha,portafolio,esNuevo){
   const ov=document.getElementById('carga-overlay');
   const res=ov.querySelector('#cg-result'), pw=ov.querySelector('#cg-pubwrap'), pb=ov.querySelector('#cg-pub'), pt=ov.querySelector('#cg-pubtxt');
   const verde=semaforo==='VERDE';
@@ -3983,14 +4033,15 @@ function render(data,semaforo,alertas,notas,periodo,fecha){
   rows+='<tr><td style="padding:9px 0;font-weight:700;border-top:2px solid #e3eced">Total</td><td style="padding:9px 0;text-align:right;font-weight:700;color:#00A8B4;border-top:2px solid #e3eced">'+(data.resumen.total.pct*100).toFixed(1)+'%</td></tr>';
   let al = alertas.length ? '<div style="margin-top:12px"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#9a6b00;font-weight:600;margin-bottom:4px">Revisar antes de publicar</div>'+alertas.map(a=>'<div style="font-size:13px;color:#9a6b00;margin:4px 0">⚠ '+a+'</div>').join('')+'</div>' : '';
   let nt = notas.length ? '<div style="margin-top:10px">'+notas.map(n=>'<div style="font-size:12px;color:#6b7d7f;margin:3px 0">· '+n+'</div>').join('')+'</div>' : '';
+  const badge = (portafolio==='greystar'?' · Greystar':'') + (esNuevo?' · edificio nuevo':'');
   res.innerHTML =
     '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;background:'+(verde?'#e7f7f0':'#fdf4e0')+';margin-bottom:14px">'
     +'<span style="width:14px;height:14px;border-radius:50%;background:'+(verde?'#12855f':'#9a6b00')+'"></span>'
-    +'<div><div style="font-weight:600;font-size:14.5px;color:'+(verde?'#12855f':'#9a6b00')+'">'+(verde?'Todo calza':'Revisa antes de publicar')+'</div>'
+    +'<div><div style="font-weight:600;font-size:14.5px;color:'+(verde?'#12855f':'#9a6b00')+'">'+(verde?'Todo calza':'Revisa antes de publicar')+badge+'</div>'
     +'<div style="font-size:12.5px;color:#6b7d7f">'+(verde?('Período '+periodo+' ('+fecha+'). Listo para publicar.'):(alertas.length+' punto(s) por revisar.'))+'</div></div></div>'
     +'<table style="width:100%;border-collapse:collapse">'+rows+'</table>'+al+nt;
   res.style.display='block'; pw.style.display='flex';
-  if(verde){ pb.disabled=false; pb.style.cursor='pointer'; pb.style.opacity='1'; pt.textContent='Al publicar, el edificio se actualiza en el dashboard al instante.'; }
+  if(verde){ pb.disabled=false; pb.style.cursor='pointer'; pb.style.opacity='1'; pt.textContent='Al publicar, se actualiza en el dashboard al instante.'; }
   else{ pb.disabled=true; pb.style.cursor='not-allowed'; pb.style.opacity='.5'; pt.textContent='Corrige los puntos marcados y vuelve a subir el Excel.'; }
 }
 
@@ -3999,9 +4050,9 @@ async function publicar(){
   const ov=document.getElementById('carga-overlay'); const pb=ov.querySelector('#cg-pub'), pt=ov.querySelector('#cg-pubtxt');
   pb.disabled=true; pb.textContent='Publicando...';
   try{
-    const r=await fetch('/api/publicar',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({slug:PENDIENTE.slug,edificio:PENDIENTE.edificio,data:PENDIENTE.data})});
+    const r=await fetch('/api/publicar',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({portafolio:PENDIENTE.portafolio,slug:PENDIENTE.slug,edificio:PENDIENTE.edificio,data:PENDIENTE.data})});
     const d=await r.json();
-    if(d.ok){ pt.innerHTML='<b style="color:#12855f">✓ Publicado.</b> '+PENDIENTE.edificio+' actualizado. Recarga el dashboard para verlo.'; pb.textContent='Publicado ✓'; pb.style.background='#12855f'; }
+    if(d.ok){ pt.innerHTML='<b style="color:#12855f">✓ Publicado.</b> '+PENDIENTE.edificio+' actualizado'+(PENDIENTE.portafolio==='greystar'?' en Greystar':'')+'. Recarga el dashboard para verlo.'; pb.textContent='Publicado ✓'; pb.style.background='#12855f'; }
     else{ pt.textContent='No se pudo publicar: '+(d.error||'error'); pb.disabled=false; pb.textContent='Publicar'; }
   }catch(e){ pt.textContent='Error de conexión al publicar.'; pb.disabled=false; pb.textContent='Publicar'; }
 }
