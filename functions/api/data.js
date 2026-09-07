@@ -1,3 +1,4 @@
+
 // GET /api/data  -> devuelve SOLO los datos permitidos según la sesión.
 //
 //   scope = "ALL"        -> todos los edificios + manifest completo
@@ -26,12 +27,30 @@ export async function onRequestGet({ request, env, ASSETS }) {
   const assetFetch = (env && env.ASSETS && env.ASSETS.fetch)
     ? (p) => env.ASSETS.fetch(new Request(`${origin}${p}`))
     : (p) => fetch(`${origin}${p}`);
+  // Lectura KV-first: si el dato está en la pizarra (AUDIT_KV) se usa ése;
+  // si no, cae automáticamente al archivo estático en /data (red de seguridad).
+  const KV = env && env.AUDIT_KV ? env.AUDIT_KV : null;
   async function readData(file) {
-    const r = await assetFetch(`/data/${file}`);
+    // clave KV: los del portafolio Greystar van con prefijo, el resto por nombre.
+    const key = file.startsWith("../data-greystar/")
+      ? "greystar/" + file.replace("../data-greystar/", "")
+      : file;
+    if (KV) {
+      const v = await KV.get(key, { type: "json" });
+      if (v !== null && v !== undefined) return v;
+    }
+    const path = file.startsWith("../data-greystar/")
+      ? "/data-greystar/" + file.replace("../data-greystar/", "")
+      : `/data/${file}`;
+    const r = await assetFetch(path);
     if (!r.ok) return null;
     return r.json();
   }
   async function readText(file) {
+    if (KV) {
+      const v = await KV.get(file);
+      if (v !== null && v !== undefined) return v;
+    }
     const r = await assetFetch(`/data/${file}`);
     if (!r.ok) return null;
     return r.text();
