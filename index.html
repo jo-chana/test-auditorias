@@ -3627,6 +3627,7 @@ async function bootstrap() {
     renderAll();
     if (d.greystar && d.greystar.enabled) {
       GREYSTAR = d.greystar;
+      window.GREYSTAR = d.greystar;
       const gt = document.getElementById('tab-greystar');
       if (gt) gt.style.display = '';
     }
