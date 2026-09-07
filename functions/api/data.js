@@ -1,3 +1,4 @@
+
 // GET /api/data  -> devuelve SOLO los datos permitidos según la sesión.
 //
 //   scope = "ALL"        -> todos los edificios + manifest completo
@@ -10,7 +11,7 @@
 // cuando el scope es un edificio puntual. El filtrado ocurre en el servidor.
 
 import { verifyToken, readSessionCookie, getSecret } from "../_session.js";
-import { ALL_BUILDINGS_LIST } from "../_users.js";
+import { ALL_BUILDINGS_LIST, getUsers } from "../_users.js";
 
 export async function onRequestGet({ request, env, ASSETS }) {
   const token = readSessionCookie(request);
@@ -76,7 +77,7 @@ export async function onRequestGet({ request, env, ASSETS }) {
       order: manifest.order,
       buildings,
       larLogo,
-      puede_cargar: !!session.puede_cargar,
+      puede_cargar: puedeCargar(env, session),
     };
 
     // ---- Portafolio Greystar: SOLO para usuarios con el flag greystar ----
@@ -180,6 +181,13 @@ export async function onRequestGet({ request, env, ASSETS }) {
     portAvgSin,
     larLogo,
   });
+}
+
+function puedeCargar(env, session) {
+  try {
+    const u = getUsers(env).find(x => x.user === session.user);
+    return !!(u && u.puede_cargar);
+  } catch (e) { return false; }
 }
 
 function json(obj, status = 200) {
