@@ -1,4 +1,3 @@
-
 // GET /api/data  -> devuelve SOLO los datos permitidos según la sesión.
 //
 //   scope = "ALL"        -> todos los edificios + manifest completo
@@ -77,6 +76,7 @@ export async function onRequestGet({ request, env, ASSETS }) {
       order: manifest.order,
       buildings,
       larLogo,
+      puede_cargar: !!session.puede_cargar,
     };
 
     // ---- Portafolio Greystar: SOLO para usuarios con el flag greystar ----
