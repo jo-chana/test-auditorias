@@ -1,4 +1,3 @@
-
 // GET /api/data  -> devuelve SOLO los datos permitidos según la sesión.
 //
 //   scope = "ALL"        -> todos los edificios + manifest completo
@@ -10,12 +9,11 @@
 // Importante: los JSON de los OTROS edificios nunca se envían al navegador
 // cuando el scope es un edificio puntual. El filtrado ocurre en el servidor.
 
-import { verifyToken, readSessionCookie, getSecret } from "../_session.js";
-import { ALL_BUILDINGS_LIST, getUsers } from "../_users.js";
+import { ALL_BUILDINGS_LIST } from "../_users.js";
+import { resolveIdentity } from "../_roles.js";
 
 export async function onRequestGet({ request, env, ASSETS }) {
-  const token = readSessionCookie(request);
-  const session = await verifyToken(token, getSecret(env));
+  const session = await resolveIdentity(request, env);
   if (!session) {
     return json({ ok: false, error: "No autorizado" }, 401);
   }
@@ -77,7 +75,7 @@ export async function onRequestGet({ request, env, ASSETS }) {
       order: manifest.order,
       buildings,
       larLogo,
-      puede_cargar: puedeCargar(env, session),
+      puede_cargar: !!session.puede_cargar,
     };
 
     // ---- Portafolio Greystar: SOLO para usuarios con el flag greystar ----
@@ -183,17 +181,9 @@ export async function onRequestGet({ request, env, ASSETS }) {
   });
 }
 
-function puedeCargar(env, session) {
-  try {
-    const u = getUsers(env).find(x => x.user === session.user);
-    return !!(u && u.puede_cargar);
-  } catch (e) { return false; }
-}
-
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: { "Content-Type": "application/json" },
   });
 }
-
