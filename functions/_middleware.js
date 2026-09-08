@@ -1,7 +1,5 @@
-// Middleware global: corre antes de servir cualquier ruta.
-// - Deja pasar libremente: /login.html, /api/login, /api/logout y assets del login.
-// - Bloquea el acceso directo a /data/*  (los JSON solo se sirven vía /api/data).
-// - Para el dashboard (/ , /index.html): exige sesión válida; si no, redirige a /login.html
+
+// Middleware global (modo dual Access + cookie).
 import { verifyToken, readSessionCookie, getSecret } from "./_session.js";
 
 export async function onRequest(context) {
@@ -9,31 +7,26 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // Rutas públicas (login y sus endpoints)
-  const publicPaths = ["/login.html", "/api/login", "/api/logout", "/favicon.ico"];
-  if (publicPaths.includes(path)) {
-    return next();
-  }
-
-  // /api/data se valida solo (tiene su propia comprobación de sesión)
-  if (path === "/api/data") {
-    return next();
-  }
-
-  // Bloquear acceso directo a los datos crudos
+  // Bloquear acceso directo a los datos crudos (siempre)
   if (path.startsWith("/data/") || path.startsWith("/data-greystar/")) {
     return new Response("No autorizado", { status: 403 });
   }
 
-  // Proteger el dashboard
-  const protectedPaths = ["/", "/index.html"];
-  if (protectedPaths.includes(path)) {
-    const token = readSessionCookie(request);
-    const session = await verifyToken(token, getSecret(env));
-    if (!session) {
-      return Response.redirect(url.origin + "/login.html", 302);
-    }
+  // Si viene la cabecera de Cloudflare Access, la identidad ya está validada
+  // en el borde -> dejar pasar. (Access corta las no autenticadas antes de llegar.)
+  if (request.headers.get("Cf-Access-Authenticated-User-Email")) {
+    return next();
   }
 
+  // --- Sin Access (sandbox): login por cookie de siempre ---
+  const publicPaths = ["/login.html", "/api/login", "/api/logout", "/favicon.ico"];
+  if (publicPaths.includes(path)) return next();
+  if (path === "/api/data") return next();
+
+  const protectedPaths = ["/", "/index.html"];
+  if (protectedPaths.includes(path)) {
+    const session = await verifyToken(readSessionCookie(request), getSecret(env));
+    if (!session) return Response.redirect(url.origin + "/login.html", 302);
+  }
   return next();
 }
