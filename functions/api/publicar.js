@@ -3,10 +3,10 @@
 //   portafolio = "lar" (default) | "greystar"
 // Guarda el edificio en el KV (en el portafolio correcto), actualiza su manifest
 // y recalcula avg_otros entre los edificios de ESE portafolio.
-import { verifyToken, readSessionCookie, getSecret } from "../_session.js";
+import { resolveIdentity } from "../_roles.js";
 
 export async function onRequestPost({ request, env }) {
-  const session = await verifyToken(readSessionCookie(request), getSecret(env));
+  const session = await resolveIdentity(request, env);
   if (!session || !(session.scope === "ALL" || session.puede_cargar)) return json({ ok:false, error:"No autorizado" }, 401);
   if (!env.AUDIT_KV) return json({ ok:false, error:"Falta el binding AUDIT_KV" }, 500);
   const KV = env.AUDIT_KV;
