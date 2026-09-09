@@ -11,6 +11,42 @@ export async function onRequestGet({ request, env }) {
   if (!session || session.scope !== "ALL") return json({ ok:false, error:"No autorizado" }, 401);
   if (!env.AUDIT_KV) return json({ ok:false, error:"Falta el binding AUDIT_KV" }, 500);
 
+  // --- Modo restaurar UN edificio desde producción (?solo=slug) ---
+  const solo = new URL(request.url).searchParams.get("solo");
+  if (solo) {
+    const r = await fetch(`${PROD}/data/${solo}.json`, { cf: { cacheTtl: 0 } });
+    if (!r.ok) return json({ ok:false, error:`No encontré ${solo}.json en producción` }, 404);
+    await env.AUDIT_KV.put(`${solo}.json`, await r.text());
+    // corregir la fecha en el manifest del KV
+    let manifest = await env.AUDIT_KV.get("manifest.json", { type:"json" });
+    const prodMres = await fetch(`${PROD}/data/manifest.json`, { cf: { cacheTtl: 0 } });
+    const prodM = prodMres.ok ? JSON.parse(await prodMres.text()) : null;
+    if (manifest && prodM) {
+      const pe = prodM.buildings.find(b => b.file === `${solo}.json`);
+      const i = manifest.buildings.findIndex(b => b.file === `${solo}.json`);
+      if (pe && i >= 0) { manifest.buildings[i].fecha = pe.fecha; await env.AUDIT_KV.put("manifest.json", JSON.stringify(manifest)); }
+    }
+    // recalcular avg_otros de todos
+    if (manifest) {
+      const all = {};
+      for (const b of manifest.buildings) { const d = await env.AUDIT_KV.get(b.file, { type:"json" }); if (d) all[b.name] = d; }
+      const names = Object.keys(all);
+      const apct = (d,n) => { const a = d.resumen.aristas.find(x => x.nombre === n); return a ? a.pct : null; };
+      const r4 = x => Math.round(x*10000)/10000;
+      for (const s2 of names) {
+        const d = all[s2];
+        for (const a of d.resumen.aristas) {
+          const vals = names.filter(o => o!==s2).map(o => apct(all[o], a.nombre)).filter(v => v!=null);
+          a.avg_otros = vals.length ? r4(vals.reduce((x,y)=>x+y,0)/vals.length) : null;
+        }
+        const tot = names.filter(o => o!==s2).map(o => all[o].resumen.total.pct);
+        d.resumen.total.avg_otros = tot.length ? r4(tot.reduce((x,y)=>x+y,0)/tot.length) : null;
+      }
+      for (const b of manifest.buildings) { if (all[b.name]) await env.AUDIT_KV.put(b.file, JSON.stringify(all[b.name])); }
+    }
+    return json({ ok:true, restaurado: `${solo}.json`, fuente:"producción" });
+  }
+
   const copiados = [];
   const get = (p) => fetch(`${PROD}${p}`, { cf: { cacheTtl: 0 } });
 
