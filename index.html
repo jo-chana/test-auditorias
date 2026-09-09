@@ -3963,6 +3963,7 @@ function open(){
   drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='#cfe0e2'; if(e.dataTransfer.files.length) manejar(e.dataTransfer.files[0]);};
   fi.onchange=e=>{ if(e.target.files.length) manejar(e.target.files[0]); };
   ov.querySelector('#cg-pub').onclick=publicar;
+  const ul=ov.querySelector('#cg-undo-link'); if(ul) ul.onclick=(e)=>{e.preventDefault(); openDeshacer();};
 }
 
 function toggleTipo(ov){
@@ -3989,7 +3990,40 @@ function panelHTML(){
    +'<div id="cg-err" style="color:#b3261e;font-size:13.5px;margin-top:12px"></div>'
    +'<div id="cg-result" style="display:none;margin-top:18px"></div>'
    +'<div id="cg-pubwrap" style="display:none;margin-top:16px;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap"><span id="cg-pubtxt" style="font-size:13px;color:#6b7d7f;flex:1"></span><button id="cg-pub" disabled style="background:#00A8B4;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:14.5px;font-weight:600;cursor:not-allowed;opacity:.5">Publicar</button></div>'
+   +'<div style="text-align:center;margin-top:14px"><a href="#" id="cg-undo-link" style="font-size:12.5px;color:#6b7d7f">¿Te equivocaste? Deshacer la última carga de un edificio</a></div>'+'</div>';
+}
+
+function openDeshacer(){
+  const ov=document.getElementById('carga-overlay'); if(!ov) return;
+  const NAMES_REV={}; Object.entries(NAMES).forEach(([sl,nm])=>NAMES_REV[nm]=sl);
+  let opts='';
+  const lar=window.ALL_BUILDINGS||{};
+  Object.keys(lar).forEach(nm=>{ const sl=NAMES_REV[nm]||slugify(nm); opts+='<option value="lar|'+sl+'|'+nm+'">'+nm+'</option>'; });
+  if(window.GREYSTAR&&window.GREYSTAR.buildings){ Object.keys(window.GREYSTAR.buildings).forEach(nm=>{ opts+='<option value="greystar|'+slugify(nm)+'|'+nm+'">'+nm+' (Greystar)</option>'; }); }
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;padding:28px 30px;box-shadow:0 20px 60px rgba(0,60,65,.25)">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><h2 style="margin:0;font-size:20px;color:#1a2b2d">Deshacer última carga</h2><button id="cg-close" style="border:none;background:none;font-size:24px;color:#6b7d7f;cursor:pointer">&times;</button></div>'
+   +'<p style="color:#6b7d7f;font-size:13.5px;margin:0 0 16px">Restaura el edificio a su estado anterior a la última carga. Si esa carga creó el edificio, lo elimina.</p>'
+   +'<label style="display:block;font-size:13px;color:#6b7d7f;margin-bottom:6px">Edificio</label>'
+   +'<select id="cg-undo-sel" style="width:100%;padding:11px 13px;font-size:15px;border:1px solid #e3eced;border-radius:10px;margin-bottom:16px">'+opts+'</select>'
+   +'<div id="cg-undo-msg" style="font-size:13px;color:#6b7d7f;margin-bottom:12px"></div>'
+   +'<div style="display:flex;justify-content:space-between;gap:12px"><a href="#" id="cg-undo-back" style="font-size:13px;color:#6b7d7f;align-self:center">← volver</a><button id="cg-undo-btn" style="background:#b3261e;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:14.5px;font-weight:600;cursor:pointer">Deshacer</button></div>'
    +'</div>';
+  ov.querySelector('#cg-close').onclick=()=>ov.remove();
+  ov.querySelector('#cg-undo-back').onclick=(e)=>{e.preventDefault(); ov.remove(); open();};
+  ov.querySelector('#cg-undo-btn').onclick=deshacer;
+}
+
+async function deshacer(){
+  const ov=document.getElementById('carga-overlay'); const sel=ov.querySelector('#cg-undo-sel').value; const msg=ov.querySelector('#cg-undo-msg'); const btn=ov.querySelector('#cg-undo-btn');
+  const [portafolio,slug,nombre]=sel.split('|');
+  if(!confirm('¿Deshacer la última carga de '+nombre+'? Esto no se puede revertir.')) return;
+  btn.disabled=true; btn.textContent='Deshaciendo...';
+  try{
+    const r=await fetch('/api/deshacer',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({portafolio,slug})});
+    const d=await r.json();
+    if(d.ok){ msg.innerHTML='<b style="color:#12855f">✓ Hecho.</b> '+nombre+' quedó '+(d.accion==='eliminado'?'eliminado':'restaurado a su auditoría anterior')+'. Recarga el dashboard.'; btn.textContent='Listo ✓'; btn.style.background='#12855f'; }
+    else{ msg.textContent='No se pudo: '+(d.error||'error'); btn.disabled=false; btn.textContent='Deshacer'; }
+  }catch(e){ msg.textContent='Error de conexión.'; btn.disabled=false; btn.textContent='Deshacer'; }
 }
 
 function manejar(file){
