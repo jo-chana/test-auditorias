@@ -1,4 +1,3 @@
-
 // POST /api/publicar  { portafolio, slug, edificio, data }
 //   portafolio = "lar" (default) | "greystar"
 // Guarda el edificio en el KV (en el portafolio correcto), actualiza su manifest
@@ -25,7 +24,8 @@ export async function onRequestPost({ request, env }) {
   const manifestKey = pref + "manifest.json";
   const fileKey = pref + `${slug}.json`;
 
-  // 1) guardar el edificio
+  const prev = await KV.get(fileKey, { type: "json" });
+  await KV.put(pref + `${slug}.bak.json`, JSON.stringify(prev || { __nuevo__: true }));
   await KV.put(fileKey, JSON.stringify(data));
 
   // 2) actualizar el manifest de ese portafolio
