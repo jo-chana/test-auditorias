@@ -19,7 +19,7 @@ export async function onRequest(context) {
   }
 
   // --- Sin Access (sandbox): login por cookie de siempre ---
-  const publicPaths = ["/login.html", "/api/login", "/api/logout", "/favicon.ico"];
+  const publicPaths = ["/login.html", "/api/login", "/api/logout", "/api/sso", "/favicon.ico"];
   if (publicPaths.includes(path)) return next();
   if (path === "/api/data") return next();
 
