@@ -1948,7 +1948,7 @@ body.single-building .view-tab[data-view="portafolio"]{display:none !important;}
   </section>
 
   <!-- ============ SECCIÓN 3 — PULSO INTERNO MENSUAL ============ -->
-  <section class="section">
+  <section class="section" id="sec-pulso">
     <div class="section-header">
       <span class="section-num">SECCIÓN 03</span>
       <h2 class="section-title">Pulso interno <em>mensual</em></h2>
@@ -2069,6 +2069,9 @@ let DATA = null;
 let PORT_AVG_CON = null;
 let PORT_AVG_SIN = null;
 let GREYSTAR = null;
+let MODE = 'lar';                 // 'lar' | 'greystar' — define el set de edificios activo
+function activeBuildings(){ return (MODE === 'greystar' && GREYSTAR) ? GREYSTAR.buildings : ALL_BUILDINGS; }
+function activeOrder(){ return (MODE === 'greystar' && GREYSTAR) ? (GREYSTAR.order || []) : BUILDING_ORDER; }
 
 function colorClass(pct) {
   if (pct >= 0.95) return 'excellent';
@@ -2128,8 +2131,10 @@ function renderHeader() {
 function renderBuildingSelector() {
   const wrap = document.getElementById('building-pills');
   wrap.innerHTML = '';
-  BUILDING_ORDER.forEach(name => {
-    const b = ALL_BUILDINGS[name];
+  const ORD = activeOrder(), BLD = activeBuildings();
+  if (!ORD.length) { document.getElementById('portfolio-avg').textContent = '—'; return; }
+  ORD.forEach(name => {
+    const b = BLD[name];
     const pct = (effectiveTotal(b) * 100).toFixed(1);
     const btn = document.createElement('button');
     btn.className = 'building-pill' + (name === CURRENT_BUILDING ? ' active' : '');
@@ -2137,14 +2142,14 @@ function renderBuildingSelector() {
     btn.addEventListener('click', () => switchBuilding(name));
     wrap.appendChild(btn);
   });
-  const portAvg = BUILDING_ORDER.reduce((s,n) => s + effectiveTotal(ALL_BUILDINGS[n]), 0) / BUILDING_ORDER.length;
+  const portAvg = ORD.reduce((s,n) => s + effectiveTotal(BLD[n]), 0) / ORD.length;
   document.getElementById('portfolio-avg').textContent = (portAvg*100).toFixed(1) + '%';
 }
 
 function switchBuilding(name) {
   if (name === CURRENT_BUILDING) return;
   CURRENT_BUILDING = name;
-  DATA = ALL_BUILDINGS[name];
+  DATA = activeBuildings()[name];
   openIdx = null;
   document.getElementById('drilldown-container').innerHTML = '';
   renderAll();
@@ -2156,7 +2161,9 @@ function renderAll() {
   renderHero();
   renderAristas();
   renderHistorico();
-  renderPulso();
+  const _ps = document.getElementById('sec-pulso');
+  if (MODE === 'greystar') { if (_ps) _ps.style.display = 'none'; }
+  else { if (_ps) _ps.style.display = ''; renderPulso(); }
   renderAccionables();
 }
 
@@ -2189,13 +2196,14 @@ function renderHero(){
   // - Comité (varios edificios cargados): promedio de los demás edificios.
   // - BM/BMA (un solo edificio): promedio del PORTAFOLIO COMPLETO precalculado
   //   en el servidor, que cambia según el toggle Con/Sin Compliance.
-  const otherPcts = BUILDING_ORDER.filter(n => n !== CURRENT_BUILDING).map(n => effectiveTotal(ALL_BUILDINGS[n]));
+  const _ord = activeOrder(), _bld = activeBuildings();
+  const otherPcts = _ord.filter(n => n !== CURRENT_BUILDING).map(n => effectiveTotal(_bld[n]));
   let avgOtros;
   if (otherPcts.length) {
     avgOtros = otherPcts.reduce((a,b)=>a+b,0)/otherPcts.length;
-  } else if (INCLUDE_COMPLIANCE && PORT_AVG_CON != null) {
+  } else if (MODE === 'lar' && INCLUDE_COMPLIANCE && PORT_AVG_CON != null) {
     avgOtros = PORT_AVG_CON;
-  } else if (!INCLUDE_COMPLIANCE && PORT_AVG_SIN != null) {
+  } else if (MODE === 'lar' && !INCLUDE_COMPLIANCE && PORT_AVG_SIN != null) {
     avgOtros = PORT_AVG_SIN;
   } else if (DATA.resumen.total.avg_otros != null) {
     avgOtros = DATA.resumen.total.avg_otros;
@@ -2575,11 +2583,15 @@ function switchView(view) {
   // BM/BMA (un solo edificio): no permitir la vista de portafolio
   if (view === 'portafolio' && BUILDING_ORDER.length <= 1) return;
   CURRENT_VIEW = view;
+  MODE = (view === 'greystar') ? 'greystar' : 'lar';
   document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
-  document.getElementById('vista-edificio').style.display = view === 'edificio' ? '' : 'none';
+  const greyOrder = (GREYSTAR && GREYSTAR.order) ? GREYSTAR.order : [];
+  const greyEmpty = (view === 'greystar') && !greyOrder.length;
+  const detailVisible = (view === 'edificio') || (view === 'greystar' && !greyEmpty);
+  document.getElementById('vista-edificio').style.display = detailVisible ? '' : 'none';
   document.getElementById('vista-portafolio').style.display = view === 'portafolio' ? '' : 'none';
   const _gv = document.getElementById('vista-greystar'); if (_gv) _gv.style.display = view === 'greystar' ? '' : 'none';
-  document.getElementById('building-selector').style.display = view === 'edificio' ? '' : 'none';
+  document.getElementById('building-selector').style.display = detailVisible ? '' : 'none';
 
   // Header dinámico según la vista: en portafolio mostramos "Resumen Comité" + logo LAR
   const h1 = document.getElementById('header-h1');
@@ -2589,13 +2601,16 @@ function switchView(view) {
     logoImg.src = LAR_LOGO;
     logoImg.alt = 'LAR Group';
     logoImg.style.display = '';
-  } else if (view === 'greystar') {
+  } else if (view === 'greystar' && greyEmpty) {
     h1.innerHTML = 'Portafolio <em id="header-edificio">Greystar</em>';
     logoImg.src = LAR_LOGO;
     logoImg.alt = 'LAR Group';
     logoImg.style.display = '';
   } else {
-    // Vista edificio: restaurar título y logo del edificio activo
+    // Vista detallada (LAR o Greystar): usa el edificio del set activo
+    const ord = activeOrder();
+    if (!ord.includes(CURRENT_BUILDING)) CURRENT_BUILDING = ord[0];
+    DATA = activeBuildings()[CURRENT_BUILDING];
     h1.innerHTML = 'Auditoría <em id="header-edificio">' + DATA.resumen.edificio + '</em>';
     if (DATA.logo) {
       logoImg.src = DATA.logo;
@@ -2607,7 +2622,8 @@ function switchView(view) {
   }
 
   if (view === 'portafolio') renderPortafolio();
-  if (view === 'greystar') renderGreystar();
+  else if (view === 'greystar' && greyEmpty) renderGreystar();
+  else { renderAll(); if (view === 'greystar') renderGreystar(); }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
