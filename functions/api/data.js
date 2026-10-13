@@ -68,11 +68,19 @@ export async function onRequestGet({ request, env, ASSETS }) {
       manifest.buildings.map(async b => [b.name, await readData(b.file)])
     );
     const buildings = Object.fromEntries(entries.filter(([, v]) => v));
+    // El order debe calzar con lo que realmente se entrega: si un nombre del
+    // order no tiene data, el front se cae entero. Los que falten se loguean.
+    const order = (manifest.order || []).filter(n => buildings[n]);
+    for (const n of Object.keys(buildings)) if (!order.includes(n)) order.push(n);
+    const faltantes = (manifest.order || []).filter(n => !buildings[n]);
+    if (faltantes.length) console.log("data: en order sin data -> " + faltantes.join(", "));
+    recalcAvgOtros(buildings);
 
     const resp = {
       ok: true,
       scope: "ALL",
-      order: manifest.order,
+      order,
+      faltantes,
       buildings,
       larLogo,
       puede_cargar: !!session.puede_cargar,
@@ -90,7 +98,9 @@ export async function onRequestGet({ request, env, ASSETS }) {
           gsManifest.buildings.map(async b => [b.name, await readData("../data-greystar/" + b.file)])
         );
         gsBuildings = Object.fromEntries(gsEntries.filter(([, v]) => v));
-        gsOrder = gsManifest.order || gsManifest.buildings.map(b => b.name);
+        gsOrder = (gsManifest.order || gsManifest.buildings.map(b => b.name)).filter(n => gsBuildings[n]);
+        for (const n of Object.keys(gsBuildings)) if (!gsOrder.includes(n)) gsOrder.push(n);
+        recalcAvgOtros(gsBuildings);
       }
 
       // Promedio LAR Group (referencia): se calcula con los 12 edificios LAR
@@ -165,6 +175,10 @@ export async function onRequestGet({ request, env, ASSETS }) {
   }
   const allData = await Promise.all(manifest.buildings.map(b => readData(b.file)));
   const valid = allData.filter(Boolean);
+  const porNombre = {};
+  manifest.buildings.forEach((b, i) => { if (allData[i]) porNombre[b.name] = allData[i]; });
+  porNombre[name] = data;
+  recalcAvgOtros(porNombre);
   const portAvgCon = valid.reduce((s,b)=>s+totalCon(b),0)/valid.length;
   const sinVals = valid.map(totalSin).filter(v=>v!=null);
   const portAvgSin = sinVals.length ? sinVals.reduce((a,c)=>a+c,0)/sinVals.length : null;
@@ -181,9 +195,29 @@ export async function onRequestGet({ request, env, ASSETS }) {
   });
 }
 
+// avg_otros = promedio de los OTROS edificios del mismo portafolio, por arista
+// y total. Se calcula al leer (antes se guardaba en cada JSON al publicar, y esa
+// reescritura de todos los edificios podía pisar una carga recién hecha).
+function recalcAvgOtros(byName) {
+  const names = Object.keys(byName);
+  const r4 = x => Math.round(x * 10000) / 10000;
+  const apct = (d, n) => { const a = d.resumen.aristas.find(x => x.nombre === n); return a ? a.pct : null; };
+  for (const s of names) {
+    const d = byName[s];
+    if (!d || !d.resumen) continue;
+    const otros = names.filter(o => o !== s && byName[o] && byName[o].resumen);
+    for (const a of d.resumen.aristas) {
+      const vals = otros.map(o => apct(byName[o], a.nombre)).filter(v => v != null);
+      a.avg_otros = vals.length ? r4(vals.reduce((x, y) => x + y, 0) / vals.length) : null;
+    }
+    const tot = otros.map(o => byName[o].resumen.total.pct);
+    d.resumen.total.avg_otros = tot.length ? r4(tot.reduce((x, y) => x + y, 0) / tot.length) : null;
+  }
+}
+
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 }
