@@ -24,40 +24,41 @@ export async function onRequestPost({ request, env }) {
   const manifestKey = pref + "manifest.json";
   const fileKey = pref + `${slug}.json`;
 
-  const prev = await KV.get(fileKey, { type: "json" });
+  if (!data.resumen || !Array.isArray(data.resumen.aristas) || !data.resumen.total || typeof data.resumen.total.pct !== "number")
+    return json({ ok:false, error:"El JSON a publicar no tiene resumen/aristas/total válidos" }, 400);
+
+  let manifest = await KV.get(manifestKey, { type:"json" });
+  if (!manifest) manifest = { buildings: [], order: [] };
+  if (!Array.isArray(manifest.order)) manifest.order = manifest.buildings.map(b => b.name);
+  const idx = manifest.buildings.findIndex(b => b.slug === slug || b.file === `${slug}.json`);
+
+  // 1) respaldo: si el edificio ya existe, el respaldo es su data actual
+  //    (KV o, si nunca se cargó al KV, el archivo estático de /data).
+  //    Solo se marca __nuevo__ si de verdad no existía en ninguna parte.
+  let prev = await KV.get(fileKey, { type: "json" });
+  if (!prev) {
+    const staticPath = portafolio === "greystar" ? `/data-greystar/${slug}.json` : `/data/${slug}.json`;
+    const r = await env.ASSETS.fetch(new Request(new URL(staticPath, request.url)));
+    if (r.ok) { try { prev = await r.json(); } catch (e) { prev = null; } }
+  }
+  if (!prev && idx >= 0) return json({ ok:false, error:`${manifest.buildings[idx].name} figura en el manifest pero no encontré su data actual; no publico para no perder el respaldo.` }, 409);
   await KV.put(pref + `${slug}.bak.json`, JSON.stringify(prev || { __nuevo__: true }));
   await KV.put(fileKey, JSON.stringify(data));
 
-  // 2) actualizar el manifest de ese portafolio
-  let manifest = await KV.get(manifestKey, { type:"json" });
-  if (!manifest) manifest = { buildings: [], order: [] };
-  const fecha = data.resumen && data.resumen.fecha ? data.resumen.fecha : null;
-  const idx = manifest.buildings.findIndex(b => b.slug === slug || b.file === `${slug}.json`);
-  const entry = { name: edificio, slug, file: `${slug}.json`, fecha, auditor: "Emilio Merino S." };
+  // 2) actualizar el manifest de ese portafolio. Si el edificio ya existe se
+  //    conserva su nombre: el order usa nombres, y cambiarlo dejaría el order
+  //    apuntando a un edificio que ya no está (el dashboard se cae).
+  const fecha = data.resumen.fecha || null;
+  const nombre = idx >= 0 ? manifest.buildings[idx].name : edificio;
+  const entry = { name: nombre, slug, file: `${slug}.json`, fecha, auditor: "Emilio Merino S." };
   if (idx >= 0) manifest.buildings[idx] = entry;
-  else { manifest.buildings.push(entry); if (!manifest.order.includes(edificio)) manifest.order.push(edificio); }
+  else manifest.buildings.push(entry);
+  if (!manifest.order.includes(nombre)) manifest.order.push(nombre);
   await KV.put(manifestKey, JSON.stringify(manifest));
 
-  // 3) recalcular avg_otros entre los edificios de ESE portafolio
-  const all = {};
-  for (const b of manifest.buildings) {
-    const d = await KV.get(pref + b.file, { type:"json" });
-    if (d) all[b.name] = d;
-  }
-  const names = Object.keys(all);
-  const apct = (d,n) => { const a = d.resumen.aristas.find(x => x.nombre === n); return a ? a.pct : null; };
-  const r4 = x => Math.round(x*10000)/10000;
-  for (const s of names) {
-    const d = all[s];
-    for (const a of d.resumen.aristas) {
-      const vals = names.filter(o => o!==s).map(o => apct(all[o], a.nombre)).filter(v => v!=null);
-      a.avg_otros = vals.length ? r4(vals.reduce((x,y)=>x+y,0)/vals.length) : null;
-    }
-    const tot = names.filter(o => o!==s).map(o => all[o].resumen.total.pct);
-    d.resumen.total.avg_otros = tot.length ? r4(tot.reduce((x,y)=>x+y,0)/tot.length) : null;
-  }
-  for (const b of manifest.buildings) { if (all[b.name]) await KV.put(pref + b.file, JSON.stringify(all[b.name])); }
-
-  return json({ ok:true, portafolio, guardado: fileKey, fecha, recalculados: names.length });
+  // avg_otros ya no se reescribe acá: lo calcula /api/data al leer. Releer y
+  // reescribir todos los edificios justo después del put leía copias viejas
+  // del KV (propagación de hasta ~60 s) y pisaba la carga recién publicada.
+  return json({ ok:true, portafolio, guardado: fileKey, fecha });
 }
 function json(o,s=200){ return new Response(JSON.stringify(o), { status:s, headers:{ "Content-Type":"application/json" } }); }
