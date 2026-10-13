@@ -1,6 +1,9 @@
-// GET /api/sso?token=<jwt>  — VERSIÓN DIAGNÓSTICO (temporal)
-// En caso de fallo, muestra el motivo en texto (no expone el secreto).
-import { createToken, getSecret } from "../_session.js";
+// GET /api/sso?token=<jwt>
+// Entrada desde el portal HUB: verifica el JWT (HS256) firmado con AUDITORIAS_SECRET
+// y crea la sesión. El rol (scope, greystar, puede_cargar) viene en el token.
+// Si algo falla, devuelve al portal; el motivo queda en los logs de Cloudflare
+// (Pages → Functions → Logs), nunca en pantalla.
+import { createToken } from "../_session.js";
 
 const FALLBACK = "https://portal-hub-lar.djeldres.workers.dev/";
 
@@ -12,38 +15,59 @@ function base64urlToBytes(str) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
-function diag(msg){ return new Response("SSO DIAG: "+msg, { status:200, headers:{ "Content-Type":"text/plain; charset=utf-8" } }); }
+function fallar(motivo) {
+  console.log("SSO rechazado: " + motivo);
+  return new Response(null, { status: 302, headers: { "Location": FALLBACK, "Cache-Control": "no-store" } });
+}
 
 export async function onRequestGet({ request, env }) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get("token");
-  if (!token) return diag("no llegó ningún token en la URL (?token=...). La tarjeta del HUB quizá no apunta a /go/auditorias.");
-  if (!env.AUDITORIAS_SECRET) return diag("falta la variable AUDITORIAS_SECRET en Cloudflare.");
+  if (!env.AUDITORIAS_SECRET || !env.SESSION_SECRET) {
+    console.log("SSO: falta AUDITORIAS_SECRET o SESSION_SECRET en el entorno");
+    return new Response("Servicio no disponible", { status: 503 });
+  }
+  const token = new URL(request.url).searchParams.get("token");
+  if (!token) return fallar("sin token");
 
   const partes = token.split(".");
-  if (partes.length !== 3) return diag("el token no tiene formato JWT (esperaba 3 partes separadas por punto, llegaron "+partes.length+").");
+  if (partes.length !== 3) return fallar("formato no JWT");
   const [encHeader, encBody, encFirma] = partes;
 
-  let header;
-  try { header = JSON.parse(new TextDecoder().decode(base64urlToBytes(encHeader))); }
-  catch(e){ return diag("no pude leer el header del token."); }
-  if (header.alg !== "HS256") return diag("el algoritmo del token es '"+header.alg+"', no HS256.");
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  let header, payload;
+  try {
+    header = JSON.parse(dec.decode(base64urlToBytes(encHeader)));
+  } catch (e) { return fallar("header ilegible"); }
+  if (header.alg !== "HS256") return fallar("alg no HS256");
 
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(env.AUDITORIAS_SECRET), { name:"HMAC", hash:"SHA-256" }, false, ["verify"]);
-  let firmaOk=false;
-  try { firmaOk = await crypto.subtle.verify("HMAC", key, base64urlToBytes(encFirma), enc.encode(`${encHeader}.${encBody}`)); } catch(e){ return diag("error verificando la firma: "+e.message); }
-  if (!firmaOk) return diag("FIRMA INVÁLIDA → el AUDITORIAS_SECRET de Cloudflare NO coincide con el que usa el portal para firmar. (revisa espacios/saltos de línea o pide el valor exacto).");
+  let firmaOk = false;
+  try {
+    const key = await crypto.subtle.importKey("raw", enc.encode(env.AUDITORIAS_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    firmaOk = await crypto.subtle.verify("HMAC", key, base64urlToBytes(encFirma), enc.encode(`${encHeader}.${encBody}`));
+  } catch (e) { return fallar("error verificando firma"); }
+  if (!firmaOk) return fallar("firma inválida");
 
-  let payload;
-  try { payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(encBody))); }
-  catch(e){ return diag("no pude leer el payload del token."); }
-  const ahora = Math.floor(Date.now()/1000);
-  if (!payload.exp) return diag("el token no trae 'exp'.");
-  if (payload.exp < ahora) return diag("TOKEN VENCIDO: expiró hace "+(ahora-payload.exp)+" s (dura 90 s). Revisa la hora del servidor o reintenta rápido.");
-  if (!payload.email || !payload.scope) return diag("el token no trae email o scope. payload: "+JSON.stringify(payload));
+  try {
+    payload = JSON.parse(dec.decode(base64urlToBytes(encBody)));
+  } catch (e) { return fallar("payload ilegible"); }
 
-  // Todo OK -> crear sesión y entrar
-  const sessionToken = await createToken({ user:payload.email, scope:payload.scope, greystar:!!payload.greystar, puede_cargar:!!payload.puede_cargar }, getSecret(env));
-  return new Response(null, { status:302, headers:{ "Location":"/", "Set-Cookie":`lar_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${12*3600}` } });
+  const ahora = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== "number" || payload.exp < ahora) return fallar("token vencido o sin exp");
+  if (typeof payload.iat === "number" && payload.iat > ahora + 60) return fallar("iat en el futuro");
+  if (typeof payload.email !== "string" || !payload.email) return fallar("sin email");
+  if (typeof payload.scope !== "string" || !payload.scope) return fallar("sin scope (" + payload.email + ")");
+
+  const sessionToken = await createToken({
+    user: payload.email.trim().toLowerCase(),
+    scope: payload.scope,
+    greystar: !!payload.greystar,
+    puede_cargar: !!payload.puede_cargar,
+  }, env.SESSION_SECRET);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      "Location": "/",
+      "Cache-Control": "no-store",
+      "Set-Cookie": `lar_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${12 * 3600}`,
+    },
+  });
 }
