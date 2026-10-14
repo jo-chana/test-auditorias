@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Auditoría — Edificios — </title>
+<title>Dashboard Auditorías</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -413,6 +413,12 @@
     color: var(--gris-500);
     margin-left: 2px;
   }
+  /* Variación vs auditoría anterior */
+  .hero-stat-value.prev-delta { font-size: 44px; font-weight: 300; letter-spacing: -0.02em; line-height: 1; }
+  .hero-stat-value.prev-delta .pct { font-size: 20px; color: var(--gris-500); }
+  .hero-stat-value.prev-delta.up { color: var(--good); }
+  .hero-stat-value.prev-delta.down { color: var(--bad); }
+  .hero-stat-value.prev-delta.flat { color: var(--gris-500); }
   .hero-stat-sub {
     margin-top: 8px;
     font-size: 12px;
@@ -1827,7 +1833,7 @@ body.single-building .view-tab[data-view="portafolio"]{display:none !important;}
   <!-- ============ HEADER ============ -->
   <header class="header">
     <div>
-      <div class="header-meta">Dashboard Comité Operacional y Servicio al Cliente &nbsp;·&nbsp; <span>Edición Abril–Mayo 2026</span></div>
+      <div class="header-meta">Dashboard Auditorías</div>
       <h1 id="header-h1">Auditoría <em id="header-edificio">Brooklyn</em></h1>
       <div class="subtitulo">Reporte histórico de auditorías</div>
       <hr class="title-rule">
@@ -1838,7 +1844,6 @@ body.single-building .view-tab[data-view="portafolio"]{display:none !important;}
         <div><span class="label">Edificio</span> <span id="header-nombre">Multifamily Brooklyn</span></div>
         <div><span class="label">Auditor</span> <span id="header-auditor">Emilio Merino S.</span></div>
         <div><span class="label">Fecha</span> <span id="header-fecha">14 / Abril / 2026</span></div>
-        <div><span class="label">Periodo</span> Q2 2026</div>
       </div>
     </div>
   </header>
@@ -2050,7 +2055,7 @@ body.single-building .view-tab[data-view="portafolio"]{display:none !important;}
 
   <footer class="footer">
     <div class="footer-left">
-      <div id="footer-left">Multifamily Brooklyn · Auditoría Q2 2026</div>
+      <div id="footer-left">Dashboard Auditorías</div>
       <div style="margin-top:6px">Generado · 2026·05·12</div>
     </div>
     <div class="footer-logo-wrap">
@@ -2108,7 +2113,7 @@ function renderHeader() {
   document.getElementById('header-nombre').textContent = 'Multifamily ' + r.edificio;
   document.getElementById('header-auditor').textContent = r.auditor;
   document.getElementById('header-fecha').textContent = fmtFecha(r.fecha);
-  document.getElementById('footer-left').textContent = 'Multifamily ' + r.edificio + ' · Auditoría Q2 2026';
+  document.getElementById('footer-left').textContent = 'Multifamily ' + r.edificio + ' · Auditoría ' + fmtFecha(r.fecha);
   document.getElementById('footer-logo-img').src = LAR_LOGO;
 
   // En vista portafolio mantener "Resumen Comité" + logo LAR; sólo actualizar en vista edificio.
@@ -2210,10 +2215,34 @@ function renderHero(){
   } else {
     avgOtros = 0;
   }
+  // Vista Greystar: la referencia es el promedio LAR Group (no los otros Greystar)
+  const larRef = (MODE === 'greystar' && GREYSTAR && GREYSTAR.larAvg)
+    ? (INCLUDE_COMPLIANCE ? GREYSTAR.larAvg.totalCon : GREYSTAR.larAvg.totalSin) : null;
+  if (larRef != null) avgOtros = larRef;
+  const refLabel = larRef != null ? 'Vs. LAR Group' : 'Vs. otros edificios';
+  const refSub = larRef != null ? 'Promedio LAR Group · ' + GREYSTAR.larAvg.nLar + ' edificios' : 'Promedio anonimizado del portafolio';
+
+  // Variación vs la auditoría anterior de este mismo edificio
+  const cmpPrev = prevComparison(DATA, INCLUDE_COMPLIANCE);
+  let prevHTML;
+  if (cmpPrev) {
+    // Diferencia entre los % ya redondeados, para que calce con lo que se muestra
+    const d = Math.round((Math.round(cmpPrev.cur * 1000) - Math.round(cmpPrev.prev * 1000))) / 10;
+    const pCls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+    const pArrow = d > 0 ? '▲' : d < 0 ? '▼' : '◆';
+    const pTxt = d > 0 ? 'Mejoró' : d < 0 ? 'Empeoró' : 'Se mantuvo';
+    prevHTML = `
+      <div class="hero-stat-value prev-delta ${pCls}">${pArrow} ${d > 0 ? '+' : ''}${d.toFixed(1)}<span class="pct"> pts</span></div>
+      <div class="hero-stat-sub"><strong>${pTxt}</strong> vs ${cmpPrev.periodo}: ${(cmpPrev.prev*100).toFixed(1)}% → ${(cmpPrev.cur*100).toFixed(1)}%${cmpPrev.fallbackSin ? '<br>Comparado sin Compliance: el período anterior no la medía' : ''}</div>`;
+  } else {
+    prevHTML = `
+      <div class="hero-stat-value prev-delta flat">—</div>
+      <div class="hero-stat-sub">Primera auditoría registrada; aún no hay período anterior.</div>`;
+  }
 
   const cls = colorClass(pct);
   const cat = categoryLabel(pct);
-  const delta = pct - avgOtros;
+  const delta = (Math.round(pct*1000) - Math.round(avgOtros*1000)) / 1000;
   const deltaCls = delta > 0.01 ? 'up' : delta < -0.01 ? 'down' : 'flat';
   const arrow = delta > 0.01 ? '▲' : delta < -0.01 ? '▼' : '◆';
   const modoBadge = INCLUDE_COMPLIANCE ? '' : '<span style="display:inline-block;padding:3px 9px;background:var(--turquesa-50);color:var(--turquesa);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;border-radius:2px;margin-left:10px;vertical-align:middle">Sin Compliance</span>';
@@ -2228,16 +2257,14 @@ function renderHero(){
       <div class="hero-label">Nota promedio ${fmtNum(nota)} / 5 · ${items_eval} ítems evaluados</div>
     </div>
     <div class="hero-stat">
-      <div class="hero-stat-label">Puntaje</div>
-      <div class="hero-stat-value big-pct">${(pct*100).toFixed(1)}<span class="pct">%</span></div>
-      <div class="hero-stat-sub">${pobt} de ${pmax} pts · ${items_eval} de ${items_total} ítems</div>
+      <div class="hero-stat-label">Vs. auditoría anterior</div>${prevHTML}
     </div>
     <div class="hero-stat">
-      <div class="hero-stat-label">Vs. otros edificios</div>
+      <div class="hero-stat-label">${refLabel}</div>
       <div class="hero-stat-value">${(avgOtros*100).toFixed(1)}%
         <span class="delta ${deltaCls}">${arrow} ${(delta*100).toFixed(1)} pts</span>
       </div>
-      <div class="hero-stat-sub">Promedio anonimizado del portafolio</div>
+      <div class="hero-stat-sub">${refSub}</div>
     </div>
   `;
 
@@ -2853,6 +2880,7 @@ function toggleCompliance(mode) {
   // Re-renderiza todo
   renderAll();
   if (CURRENT_VIEW === 'portafolio') renderPortafolio();
+  if (CURRENT_VIEW === 'greystar') renderGreystar();
 }
 
 // Calcula la serie histórica del total general de un edificio, EXCLUYENDO Compliance
@@ -2874,6 +2902,28 @@ function totalSerieEffective(historico) {
     return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
   });
   return { periods: historico.periods, values };
+}
+
+// Variación del total de un edificio vs su auditoría anterior, según el modo.
+// Con Compliance solo se compara si el período anterior también la midió; si no,
+// se compara sin Compliance (fallbackSin) para no mezclar metodologías.
+function prevComparison(b, include) {
+  const h = b && b.historico;
+  if (!h || !h.periods || h.periods.length < 2 || !h.dims) return null;
+  const dimsCon = (h.dim_order && h.dim_order.length) ? h.dim_order : ALL_DIMS;
+  const avgAt = (dims, i) => {
+    const v = dims.map(d => (h.dims[d] || [])[i]).filter(x => x != null);
+    return v.length ? v.reduce((a, c) => a + c, 0) / v.length : null;
+  };
+  const last = h.periods.length - 1;
+  let prevIdx = -1;
+  for (let i = last - 1; i >= 0; i--) { if (avgAt(COMPARABLE_DIMS, i) != null) { prevIdx = i; break; } }
+  if (prevIdx < 0) return null;
+  const prevTieneComp = (h.dims['Compliance'] || [])[prevIdx] != null;
+  const dims = (include && prevTieneComp) ? dimsCon : COMPARABLE_DIMS;
+  const cur = avgAt(dims, last), prev = avgAt(dims, prevIdx);
+  if (cur == null || prev == null) return null;
+  return { cur, prev, delta: cur - prev, periodo: h.periods[prevIdx], fallbackSin: include && !prevTieneComp };
 }
 
 function renderPtfSummary() {
@@ -3550,9 +3600,12 @@ function renderGreystar() {
     cont = document.createElement('div');
     cont.id = 'vista-greystar';
     cont.style.display = 'none';
-    const ptf = document.getElementById('vista-portafolio');
-    ptf.parentNode.insertBefore(cont, ptf.nextSibling);
+    // Arriba de todo (antes del selector), para que el comparativo con LAR se vea
+    // apenas se entra a la vista y no al final del detalle del edificio.
+    const sel = document.getElementById('building-selector');
+    sel.parentNode.insertBefore(cont, sel);
   }
+  cont.style.display = (CURRENT_VIEW === 'greystar') ? '' : 'none';
   const TEAL = '#0A2245', GREY = '#888780';
   const order = GREYSTAR.order || [];
   const blds = order.map(n => GREYSTAR.buildings[n]).filter(Boolean);
@@ -3572,58 +3625,64 @@ function renderGreystar() {
     return;
   }
 
-  const totOf = b => b.resumen.total.pct;
+  // Todo respeta el toggle Con/Sin Compliance (effectiveTotal + referencia LAR del mismo modo)
+  const totOf = b => effectiveTotal(b);
   const gsAvg = blds.reduce((s2,b)=>s2+totOf(b),0)/blds.length;
-  const larTot = lar.totalCon;
+  const larTot = INCLUDE_COMPLIANCE ? lar.totalCon : lar.totalSin;
   const ranked = blds.slice().sort((a,b)=>totOf(b)-totOf(a));
   const pct = v => (v*100).toFixed(1) + '%';
+  // Diferencias calculadas sobre los % ya redondeados, para que calcen con lo que se ve
+  const dr = (a,b) => (Math.round(a*1000) - Math.round(b*1000)) / 10;
+  const pts = (a,b) => { const x = dr(a,b); return (x>0?'▲ +':x<0?'▼ ':'◆ ')+x.toFixed(1)+' pts'; };
+  const ptsColor = (a,b) => { const x = dr(a,b); return x>0?'var(--good)':x<0?'var(--bad)':'var(--gris-500)'; };
+  const modoTxt = INCLUDE_COMPLIANCE ? 'Con Compliance' : 'Sin Compliance';
+  const th = 'text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6b7d7f;font-weight:600;padding:8px 10px;border-bottom:2px solid #e3eced;';
+  const td = 'padding:10px;border-bottom:1px solid #eef3f3;font-size:13.5px;';
+  const num = 'text-align:right;font-variant-numeric:tabular-nums;';
 
-  // barras comparativas de edificios + línea de referencia LAR
-  let bars = ranked.map(b=>{
+  // Tabla por edificio: resultado, referencia LAR y diferencia
+  const filasEd = ranked.map(b=>{
     const v = totOf(b);
-    const larLeft = larTot!=null ? (larTot*100) : null;
-    return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">'+
-      '<div style="width:120px;font-size:13px;color:#4a5c5e;">'+b.resumen.edificio+'</div>'+
-      '<div style="flex:1;background:#eef3f3;border-radius:6px;height:26px;position:relative;overflow:hidden;">'+
-        '<div style="width:'+(v*100)+'%;height:100%;background:'+TEAL+';border-radius:6px;"></div>'+
-        (larLeft!=null?'<div style="position:absolute;top:-4px;bottom:-4px;left:'+larLeft+'%;width:2px;background:'+GREY+';"></div>':'')+
-      '</div>'+
-      '<div style="width:52px;text-align:right;font-size:13px;font-weight:600;">'+pct(v)+'</div>'+
-    '</div>';
+    return '<tr><td style="'+td+'color:#1a2b2d;">'+b.resumen.edificio+'</td>'+
+      '<td style="'+td+num+'font-weight:600;color:'+TEAL+';">'+pct(v)+'</td>'+
+      '<td style="'+td+num+'color:#4a5c5e;">'+(larTot!=null?pct(larTot):'—')+'</td>'+
+      '<td style="'+td+num+'font-weight:600;color:'+(larTot!=null?ptsColor(v,larTot):'#6b7d7f')+';">'+(larTot!=null?pts(v,larTot):'—')+'</td></tr>';
   }).join('');
 
-  // por arista: promedio Greystar vs LAR Group
+  // Tabla por arista: promedio Greystar vs promedio LAR Group
   const aristaNames = [];
   blds.forEach(b=>b.resumen.aristas.forEach(a=>{ if(!aristaNames.includes(a.nombre)) aristaNames.push(a.nombre); }));
-  let arRows = aristaNames.map(nom=>{
-    const gv = (()=>{ const vs=blds.map(b=>{const a=b.resumen.aristas.find(x=>x.nombre===nom);return a?a.pct:null;}).filter(x=>x!=null); return vs.length?vs.reduce((a,c)=>a+c,0)/vs.length:null; })();
+  const filasAr = aristaNames.filter(nom => INCLUDE_COMPLIANCE || nom !== 'Compliance').map(nom=>{
+    const vs = blds.map(b=>{const a=b.resumen.aristas.find(x=>x.nombre===nom);return a?a.pct:null;}).filter(x=>x!=null);
+    const gv = vs.length ? vs.reduce((a,c)=>a+c,0)/vs.length : null;
     const lv = lar.aristas[nom];
     if (gv==null) return '';
-    return '<div style="margin-bottom:12px;">'+
-      '<div style="font-size:12.5px;color:#4a5c5e;margin-bottom:4px;">'+nom+'</div>'+
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;"><div style="flex:1;background:#eef3f3;border-radius:4px;height:13px;"><div style="width:'+(gv*100)+'%;height:100%;background:'+TEAL+';border-radius:4px;"></div></div><div style="width:48px;text-align:right;font-size:11.5px;font-weight:600;">'+pct(gv)+'</div></div>'+
-      (lv!=null?'<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;background:#eef3f3;border-radius:4px;height:13px;"><div style="width:'+(lv*100)+'%;height:100%;background:'+GREY+';border-radius:4px;"></div></div><div style="width:48px;text-align:right;font-size:11.5px;color:#6b7d7f;">'+pct(lv)+'</div></div>':'')+
-    '</div>';
+    return '<tr><td style="'+td+'color:#1a2b2d;">'+nom+'</td>'+
+      '<td style="'+td+num+'font-weight:600;color:'+TEAL+';">'+pct(gv)+'</td>'+
+      '<td style="'+td+num+'color:#4a5c5e;">'+(lv!=null?pct(lv):'—')+'</td>'+
+      '<td style="'+td+num+'font-weight:600;color:'+(lv!=null?ptsColor(gv,lv):'#6b7d7f')+';">'+(lv!=null?pts(gv,lv):'—')+'</td></tr>';
   }).join('');
 
-  const deltaTxt = (larTot!=null) ? (((gsAvg-larTot)*100>=0?'+':'')+((gsAvg-larTot)*100).toFixed(1)+' pts vs LAR') : '';
+  const tabla = (titulo, col1, filas) =>
+    '<div class="bloque-titulo acento" style="margin:26px 0 10px;">'+titulo+'</div>'+
+    '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:420px;">'+
+    '<thead><tr><th style="'+th+'">'+col1+'</th><th style="'+th+num+'">Greystar</th><th style="'+th+num+'">LAR Group</th><th style="'+th+num+'">Diferencia</th></tr></thead>'+
+    '<tbody>'+filas+'</tbody></table></div>';
+
+  const dif = larTot!=null;
   cont.innerHTML =
     '<section class="section"><div class="section-header">'+
     '<span class="section-num">RESTRINGIDO</span>'+
-    '<h2 class="section-title">Comparativo <em>Greystar</em></h2>'+
-    '<span class="section-aside">'+blds.length+' edificios · solo comité Greystar</span></div><hr class="section-rule">'+
-    '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:20px 0 28px;">'+
+    '<h2 class="section-title">Greystar <em>vs LAR Group</em></h2>'+
+    '<span class="section-aside">'+blds.length+' edificios · '+modoTxt+'</span></div><hr class="section-rule">'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:20px 0 6px;">'+
       '<div style="flex:1;min-width:150px;background:#f4f8f8;border-radius:12px;padding:16px 18px;"><div style="font-size:12px;color:#6b7d7f;margin-bottom:4px;">Promedio Greystar</div><div style="font-size:30px;font-weight:600;color:'+TEAL+';">'+pct(gsAvg)+'</div></div>'+
-      (larTot!=null?'<div style="flex:1;min-width:150px;background:#f4f8f8;border-radius:12px;padding:16px 18px;"><div style="font-size:12px;color:#6b7d7f;margin-bottom:4px;">Promedio LAR Group (referencia)</div><div style="font-size:30px;font-weight:600;color:#4a5c5e;">'+pct(larTot)+'</div><div style="font-size:12px;color:#6b7d7f;margin-top:2px;">'+deltaTxt+'</div></div>':'')+
+      '<div style="flex:1;min-width:150px;background:#f4f8f8;border-radius:12px;padding:16px 18px;"><div style="font-size:12px;color:#6b7d7f;margin-bottom:4px;">Promedio LAR Group</div><div style="font-size:30px;font-weight:600;color:#4a5c5e;">'+(larTot!=null?pct(larTot):'—')+'</div>'+(lar.nLar?'<div style="font-size:12px;color:#6b7d7f;margin-top:2px;">'+lar.nLar+' edificios LAR</div>':'')+'</div>'+
+      '<div style="flex:1;min-width:150px;background:#f4f8f8;border-radius:12px;padding:16px 18px;"><div style="font-size:12px;color:#6b7d7f;margin-bottom:4px;">Greystar vs LAR</div><div style="font-size:30px;font-weight:600;color:'+(dif?ptsColor(gsAvg,larTot):'#6b7d7f')+';">'+(dif?pts(gsAvg,larTot):'—')+'</div></div>'+
     '</div>'+
-    '<div class="bloque-titulo acento" style="margin-bottom:14px;">Resultado por edificio Greystar · con referencia LAR Group</div>'+
-    bars +
-    '<div class="bloque-titulo acento" style="margin:30px 0 14px;">Promedio Greystar vs LAR Group · por arista</div>'+
-    arRows +
-    '<div style="display:flex;gap:18px;margin-top:14px;font-size:11.5px;color:#4a5c5e;">'+
-      '<span style="display:flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:'+TEAL+';"></span>Greystar</span>'+
-      '<span style="display:flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:'+GREY+';"></span>Promedio LAR Group</span>'+
-    '</div>'+
+    tabla('Resultado por edificio Greystar vs promedio LAR Group', 'Edificio', filasEd)+
+    tabla('Por arista · promedio Greystar vs promedio LAR Group', 'Arista', filasAr)+
+    '<div style="font-size:12px;color:#6b7d7f;margin-top:12px;">Diferencia en puntos porcentuales. ▲ Greystar sobre LAR · ▼ Greystar bajo LAR. Más abajo, el detalle de cada edificio Greystar.</div>'+
     '</section>';
 }
 
